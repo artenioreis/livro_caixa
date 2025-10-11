@@ -8,13 +8,27 @@ import re
 from werkzeug.utils import secure_filename
 
 # --- Bibliotecas para OCR ---
-from PIL import Image
-import pytesseract
-from pdf2image import convert_from_path
-
-# Se você instalou o Tesseract em um local não padrão no Windows, descomente e ajuste a linha abaixo:
-# pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
-# -----------------------------
+try:
+    from PIL import Image
+    import pytesseract
+    from pdf2image import convert_from_path
+    
+    # CONFIGURAÇÃO DO CAMINHO DO TESSERACT - AJUSTE MANUAL
+    pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
+    
+    # Verificar se o Tesseract está acessível
+    try:
+        pytesseract.get_tesseract_version()
+        TESSERACT_AVAILABLE = True
+        print("✓ Tesseract OCR configurado com sucesso!")
+        print(f"✓ Caminho: {pytesseract.pytesseract.tesseract_cmd}")
+    except Exception as e:
+        TESSERACT_AVAILABLE = False
+        print(f"✗ Erro ao acessar Tesseract: {e}")
+        
+except ImportError as e:
+    TESSERACT_AVAILABLE = False
+    print(f"✗ Bibliotecas OCR não disponíveis: {e}")
 
 from reportlab.lib.pagesizes import A4, letter
 from reportlab.pdfgen import canvas
@@ -117,7 +131,7 @@ def uploaded_file(filename):
 
 # Rotas principais
 @app.route('/')
-@app.route('/index') # >>> ROTA ADICIONADA PARA CONSISTÊNCIA <<<
+@app.route('/index')
 def index():
     return render_template('index.html')
 
@@ -129,9 +143,15 @@ def lancamentos():
 def relatorios():
     return render_template('relatorios.html')
 
-# >>> ROTA PARA OCR CORRIGIDA <<<
+# Rota para OCR com tratamento de erro
 @app.route('/api/ocr/processar', methods=['POST'])
 def processar_ocr():
+    if not TESSERACT_AVAILABLE:
+        return jsonify({
+            'success': False, 
+            'error': 'Recurso OCR não disponível. Tesseract não encontrado no caminho configurado.'
+        })
+
     if 'anexo' not in request.files:
         return jsonify({'success': False, 'error': 'Nenhum arquivo enviado.'})
 
@@ -145,25 +165,46 @@ def processar_ocr():
         file.save(filepath)
 
         text = ''
-        # CORREÇÃO: 'endsWith' -> 'endswith' (minúsculo)
         if filename.lower().endswith('.pdf'):
-            pages = convert_from_path(filepath, 200)
-            for page in pages:
-                text += pytesseract.image_to_string(page, lang='por') + '\n'
+            try:
+                pages = convert_from_path(filepath, 200)
+                for page in pages:
+                    text += pytesseract.image_to_string(page, lang='por') + '\n'
+            except Exception as e:
+                return jsonify({
+                    'success': False, 
+                    'error': f'Erro ao processar PDF: {str(e)}'
+                })
         else:
-            text = pytesseract.image_to_string(Image.open(filepath), lang='por')
+            try:
+                text = pytesseract.image_to_string(Image.open(filepath), lang='por')
+            except Exception as e:
+                return jsonify({
+                    'success': False, 
+                    'error': f'Erro ao processar imagem: {str(e)}'
+                })
         
+        # Processar texto para encontrar valores monetários
         matches = re.findall(r'(\d+[\.,]\d{2})', text)
         valor_encontrado = 0.0
         if matches:
             max_valor = 0
             for match in matches:
-                valor_numerico = float(match.replace(',', '.'))
-                if valor_numerico > max_valor:
-                    max_valor = valor_numerico
+                try:
+                    valor_numerico = float(match.replace(',', '.'))
+                    if valor_numerico > max_valor:
+                        max_valor = valor_numerico
+                except ValueError:
+                    continue
             valor_encontrado = max_valor
 
-        return jsonify({'success': True, 'valor': valor_encontrado, 'texto': text})
+        return jsonify({
+            'success': True, 
+            'valor': valor_encontrado, 
+            'texto': text,
+            'mensagem': f'Processado com sucesso. Valor encontrado: R$ {valor_encontrado:.2f}' if valor_encontrado > 0 else 'Processado mas nenhum valor monetário encontrado.'
+        })
+        
     except Exception as e:
         return jsonify({'success': False, 'error': f'Erro ao processar o arquivo: {str(e)}'})
 
@@ -506,5 +547,6 @@ def formatar_moeda_pdf(valor):
 
 # Inicialização
 if __name__ == '__main__':
+    print("Iniciando Livro Caixa Financeiro...")
     init_db()
     app.run(debug=True, host='0.0.0.0', port=5000)
