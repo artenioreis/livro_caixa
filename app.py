@@ -78,26 +78,6 @@ def init_db():
             VALUES (?, ?, ?)
         ''', categoria)
     
-    # Inserir dados de exemplo
-    transacoes_exemplo = [
-        ('Salário Mensal', 5000.00, 'receita', 'Salário', '2024-01-05'),
-        ('Aluguel', 1500.00, 'despesa', 'Moradia', '2024-01-10'),
-        ('Supermercado', 450.00, 'despesa', 'Alimentação', '2024-01-12'),
-        ('Freelance Site', 1200.00, 'receita', 'Freelance', '2024-01-15'),
-        ('Academia', 120.00, 'despesa', 'Saúde', '2024-01-20'),
-        ('Combustível', 200.00, 'despesa', 'Transporte', '2024-01-22'),
-        ('Dividendos', 350.00, 'receita', 'Investimentos', '2024-01-25'),
-        ('Restaurante', 80.00, 'despesa', 'Alimentação', '2024-01-28'),
-        ('Curso Online', 299.00, 'despesa', 'Educação', '2024-02-01'),
-        ('Venda Notebook', 1200.00, 'receita', 'Vendas', '2024-02-05')
-    ]
-    
-    for transacao in transacoes_exemplo:
-        conn.execute('''
-            INSERT OR IGNORE INTO transacoes (descricao, valor, tipo, categoria, data)
-            VALUES (?, ?, ?, ?, ?)
-        ''', transacao)
-    
     conn.commit()
     conn.close()
 
@@ -106,9 +86,9 @@ def init_db():
 def index():
     return render_template('index.html')
 
-@app.route('/dashboard')
-def dashboard():
-    return render_template('dashboard.html')
+@app.route('/lancamentos')
+def lancamentos():
+    return render_template('lancamentos.html')
 
 @app.route('/relatorios')
 def relatorios():
@@ -120,13 +100,20 @@ def api_transacoes():
     conn = get_db_connection()
     
     if request.method == 'GET':
-        # Buscar todas as transações
-        transacoes = conn.execute('''
+        limit = request.args.get('limit', type=int)
+        
+        query = '''
             SELECT t.*, c.cor 
             FROM transacoes t 
             LEFT JOIN categorias c ON t.categoria = c.nome AND t.tipo = c.tipo
             ORDER BY t.data DESC, t.id DESC
-        ''').fetchall()
+        '''
+        params = []
+        if limit:
+            query += ' LIMIT ?'
+            params.append(limit)
+            
+        transacoes = conn.execute(query, params).fetchall()
         
         result = []
         for transacao in transacoes:

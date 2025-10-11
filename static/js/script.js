@@ -3,11 +3,19 @@ let transacoes = [];
 
 // Inicialização
 document.addEventListener('DOMContentLoaded', function() {
-    carregarDados();
-    configurarFormulario();
+    if (document.getElementById('form-transacao')) {
+        configurarFormulario();
+    }
+    if (document.getElementById('form-relatorio')) {
+        configurarFormularioRelatorio();
+    }
     
-    // Atualizar dados a cada 30 segundos
-    setInterval(carregarDados, 30000);
+    // Carrega os dados principais, presentes no dashboard
+    if (document.getElementById('total-receitas')) {
+        carregarDados();
+        // Atualizar dados a cada 30 segundos
+        setInterval(carregarDados, 30000);
+    }
 });
 
 function carregarDados() {
@@ -34,7 +42,13 @@ function configurarFormulario() {
 // API Calls
 async function carregarTransacoes() {
     try {
-        const response = await fetch('/api/transacoes');
+        let url = '/api/transacoes';
+        // Se estiver na página inicial, limita para 5 transações
+        if (window.location.pathname === '/') {
+            url += '?limit=5';
+        }
+        
+        const response = await fetch(url);
         transacoes = await response.json();
         exibirTransacoes();
     } catch (error) {
@@ -48,16 +62,21 @@ async function carregarSaldo() {
         const saldo = await response.json();
         
         document.getElementById('total-receitas').textContent = 
-            formatarMoeda(saldo.receitas);
+            formatarMoeda(saldo.geral.receitas);
         document.getElementById('total-despesas').textContent = 
-            formatarMoeda(saldo.despesas);
+            formatarMoeda(saldo.geral.despesas);
         document.getElementById('saldo-total').textContent = 
-            formatarMoeda(saldo.saldo);
+            formatarMoeda(saldo.geral.saldo);
             
-        // Cor do saldo
-        const saldoElement = document.getElementById('saldo-total');
-        saldoElement.parentElement.parentElement.className = 
-            saldo.saldo >= 0 ? 'card bg-info text-white' : 'card bg-warning text-white';
+        // CORREÇÃO APLICADA AQUI
+        const cardSaldo = document.querySelector('.card-saldo');
+        if (saldo.geral.saldo >= 0) {
+            cardSaldo.classList.remove('negative-saldo');
+            cardSaldo.classList.add('positive-saldo');
+        } else {
+            cardSaldo.classList.remove('positive-saldo');
+            cardSaldo.classList.add('negative-saldo');
+        }
             
     } catch (error) {
         console.error('Erro ao carregar saldo:', error);
@@ -174,7 +193,6 @@ async function carregarGraficoCategorias() {
 // Funções de transações
 async function adicionarTransacao() {
     const form = document.getElementById('form-transacao');
-    const formData = new FormData(form);
     
     const transacao = {
         descricao: document.getElementById('descricao').value,
@@ -198,8 +216,11 @@ async function adicionarTransacao() {
         if (result.success) {
             form.reset();
             document.getElementById('data').value = new Date().toISOString().split('T')[0];
-            carregarDados();
             mostrarMensagem('Transação adicionada com sucesso!', 'success');
+            // Redireciona para o dashboard para ver a transação
+            setTimeout(() => {
+                window.location.href = '/';
+            }, 1000);
         } else {
             throw new Error(result.error);
         }
@@ -235,7 +256,8 @@ async function excluirTransacao(id) {
 
 function exibirTransacoes() {
     const container = document.getElementById('lista-transacoes');
-    
+    if (!container) return;
+
     if (transacoes.length === 0) {
         container.innerHTML = `
             <div class="text-center text-muted py-4">
@@ -281,6 +303,7 @@ function formatarMoeda(valor) {
 }
 
 function formatarData(data) {
+    // Adiciona T00:00:00 para evitar problemas de fuso horário
     return new Date(data + 'T00:00:00').toLocaleDateString('pt-BR');
 }
 
@@ -294,7 +317,6 @@ function formatarMes(mesAno) {
 }
 
 function mostrarMensagem(mensagem, tipo) {
-    // Criar elemento de alerta
     const alerta = document.createElement('div');
     alerta.className = `alert alert-${tipo} alert-dismissible fade show position-fixed`;
     alerta.style.cssText = `
@@ -310,20 +332,17 @@ function mostrarMensagem(mensagem, tipo) {
     
     document.body.appendChild(alerta);
     
-    // Remover após 5 segundos
     setTimeout(() => {
         if (alerta.parentNode) {
             alerta.parentNode.removeChild(alerta);
         }
     }, 5000);
-}f
+}
 
-// ... (código anterior mantido)
+// --- Funções de Relatório ---
 
-// Variáveis para relatório
 let dadosRelatorio = null;
 
-// Configurar datas padrão para o relatório
 function configurarDatasRelatorio() {
     const hoje = new Date();
     const primeiroDiaMes = new Date(hoje.getFullYear(), hoje.getMonth(), 1);
@@ -332,7 +351,6 @@ function configurarDatasRelatorio() {
     document.getElementById('data-fim').value = hoje.toISOString().split('T')[0];
 }
 
-// Configurar formulário de relatório
 function configurarFormularioRelatorio() {
     const form = document.getElementById('form-relatorio');
     
@@ -342,9 +360,9 @@ function configurarFormularioRelatorio() {
     });
     
     configurarDatasRelatorio();
+    gerarRelatorio(); // Gera um relatório inicial com as datas padrão
 }
 
-// Gerar relatório
 async function gerarRelatorio() {
     const dataInicio = document.getElementById('data-inicio').value;
     const dataFim = document.getElementById('data-fim').value;
@@ -355,14 +373,12 @@ async function gerarRelatorio() {
         return;
     }
     
-    // Mostrar loading
     const resultadoDiv = document.getElementById('resultado-relatorio');
     resultadoDiv.innerHTML = `
-        <div class="loading-relatorio">
+        <div class="text-center py-5">
             <div class="spinner-border text-primary" role="status">
                 <span class="visually-hidden">Carregando...</span>
             </div>
-            <p class="mt-2 text-muted">Gerando relatório...</p>
         </div>
     `;
     resultadoDiv.style.display = 'block';
@@ -372,116 +388,155 @@ async function gerarRelatorio() {
         dadosRelatorio = await response.json();
         
         exibirRelatorio();
-        mostrarMensagem('Relatório gerado com sucesso!', 'success');
         
     } catch (error) {
         console.error('Erro ao gerar relatório:', error);
         mostrarMensagem('Erro ao gerar relatório!', 'danger');
-        resultadoDiv.style.display = 'none';
+        resultadoDiv.innerHTML = `<div class="alert alert-danger">Erro ao carregar dados.</div>`;
     }
 }
 
-// Exibir relatório na tela
 function exibirRelatorio() {
     const resultadoDiv = document.getElementById('resultado-relatorio');
-    const resumoDiv = document.getElementById('resumo-relatorio');
-    const corpoTabela = document.getElementById('corpo-tabela-relatorio');
-    const rodapeTabela = document.getElementById('rodape-tabela-relatorio');
     
-    if (!dadosRelatorio || dadosRelatorio.transacoes.length === 0) {
-        resultadoDiv.innerHTML = `
-            <div class="text-center text-muted py-4">
-                <i class="fas fa-search fa-3x mb-3"></i>
-                <p>Nenhuma transação encontrada para o período selecionado</p>
-            </div>
-        `;
+    if (!dadosRelatorio) {
+        resultadoDiv.style.display = 'none';
         return;
     }
-    
-    // Calcular totais
+
+    let html = '';
+
+    // Resumo
     const totais = dadosRelatorio.totais;
     const totalReceitas = totais.receita ? totais.receita.total : 0;
     const totalDespesas = totais.despesa ? totais.despesa.total : 0;
     const saldo = totalReceitas - totalDespesas;
-    
-    // Exibir resumo
-    resumoDiv.innerHTML = `
-        <div class="col-md-3">
-            <div class="card card-resumo bg-light">
-                <div class="card-body text-center">
-                    <h6 class="card-title text-muted">Total de Transações</h6>
-                    <h3 class="text-primary">${dadosRelatorio.transacoes.length}</h3>
+
+    html += `
+        <div class="row mb-4" id="resumo-relatorio">
+            <div class="col-md-3 mb-3">
+                <div class="card card-resumo bg-light">
+                    <div class="card-body text-center">
+                        <h6 class="card-title text-muted">Transações</h6>
+                        <h3 class="text-primary">${dadosRelatorio.transacoes.length}</h3>
+                    </div>
                 </div>
             </div>
-        </div>
-        <div class="col-md-3">
-            <div class="card card-resumo bg-success bg-opacity-10">
-                <div class="card-body text-center">
-                    <h6 class="card-title text-muted">Total Receitas</h6>
-                    <h3 class="text-success">${formatarMoeda(totalReceitas)}</h3>
+            <div class="col-md-3 mb-3">
+                <div class="card card-resumo bg-success bg-opacity-10">
+                    <div class="card-body text-center">
+                        <h6 class="card-title text-muted">Receitas</h6>
+                        <h3 class="text-success">${formatarMoeda(totalReceitas)}</h3>
+                    </div>
                 </div>
             </div>
-        </div>
-        <div class="col-md-3">
-            <div class="card card-resumo bg-danger bg-opacity-10">
-                <div class="card-body text-center">
-                    <h6 class="card-title text-muted">Total Despesas</h6>
-                    <h3 class="text-danger">${formatarMoeda(totalDespesas)}</h3>
+            <div class="col-md-3 mb-3">
+                <div class="card card-resumo bg-danger bg-opacity-10">
+                    <div class="card-body text-center">
+                        <h6 class="card-title text-muted">Despesas</h6>
+                        <h3 class="text-danger">${formatarMoeda(totalDespesas)}</h3>
+                    </div>
                 </div>
             </div>
-        </div>
-        <div class="col-md-3">
-            <div class="card card-resumo ${saldo >= 0 ? 'bg-info bg-opacity-10' : 'bg-warning bg-opacity-10'}">
-                <div class="card-body text-center">
-                    <h6 class="card-title text-muted">Saldo do Período</h6>
-                    <h3 class="${saldo >= 0 ? 'text-info' : 'text-warning'}">${formatarMoeda(saldo)}</h3>
+            <div class="col-md-3 mb-3">
+                <div class="card card-resumo ${saldo >= 0 ? 'bg-info bg-opacity-10' : 'bg-warning bg-opacity-10'}">
+                    <div class="card-body text-center">
+                        <h6 class="card-title text-muted">Saldo</h6>
+                        <h3 class="${saldo >= 0 ? 'text-info' : 'text-warning'}">${formatarMoeda(saldo)}</h3>
+                    </div>
                 </div>
             </div>
         </div>
     `;
-    
-    // Exibir transações
-    corpoTabela.innerHTML = dadosRelatorio.transacoes.map(transacao => `
-        <tr>
-            <td>${formatarData(transacao.data)}</td>
-            <td>${transacao.descricao}</td>
-            <td>
-                <span class="badge bg-secondary">${transacao.categoria}</span>
-            </td>
-            <td>
-                <span class="badge ${transacao.tipo === 'receita' ? 'badge-receita' : 'badge-despesa'}">
-                    ${transacao.tipo === 'receita' ? 'Receita' : 'Despesa'}
-                </span>
-            </td>
-            <td class="text-end ${transacao.tipo === 'receita' ? 'text-success' : 'text-danger'}">
-                <strong>${transacao.tipo === 'receita' ? '+' : '-'} ${formatarMoeda(transacao.valor)}</strong>
-            </td>
-        </tr>
-    `).join('');
-    
-    // Exibir rodape com totais
-    rodapeTabela.innerHTML = `
-        <tr>
-            <td colspan="3"></td>
-            <td class="text-end"><strong>Total Receitas:</strong></td>
-            <td class="text-end text-success"><strong>+ ${formatarMoeda(totalReceitas)}</strong></td>
-        </tr>
-        <tr>
-            <td colspan="3"></td>
-            <td class="text-end"><strong>Total Despesas:</strong></td>
-            <td class="text-end text-danger"><strong>- ${formatarMoeda(totalDespesas)}</strong></td>
-        </tr>
-        <tr class="table-active">
-            <td colspan="3"></td>
-            <td class="text-end"><strong>Saldo Final:</strong></td>
-            <td class="text-end ${saldo >= 0 ? 'text-success' : 'text-danger'}">
-                <strong>${formatarMoeda(saldo)}</strong>
-            </td>
-        </tr>
+
+    // Tabela
+    html += `
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h6 class="mb-0"><i class="fas fa-list-ul me-2"></i>Transações do Período</h6>
+                <div>
+                    <button class="btn btn-sm btn-outline-secondary" onclick="exportarPDF()">
+                        <i class="fas fa-file-pdf me-1"></i>PDF
+                    </button>
+                    <button class="btn btn-sm btn-outline-secondary" onclick="imprimirRelatorio()">
+                        <i class="fas fa-print me-1"></i>Imprimir
+                    </button>
+                </div>
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-striped table-hover mb-0" id="tabela-relatorio">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Data</th>
+                                <th>Descrição</th>
+                                <th>Categoria</th>
+                                <th>Tipo</th>
+                                <th class="text-end">Valor (R$)</th>
+                            </tr>
+                        </thead>
+                        <tbody>
     `;
+
+    if (dadosRelatorio.transacoes.length === 0) {
+        html += `
+            <tr>
+                <td colspan="5" class="text-center text-muted py-4">
+                    Nenhuma transação encontrada para o período selecionado.
+                </td>
+            </tr>
+        `;
+    } else {
+        dadosRelatorio.transacoes.forEach(transacao => {
+            html += `
+                <tr>
+                    <td>${formatarData(transacao.data)}</td>
+                    <td>${transacao.descricao}</td>
+                    <td><span class="badge bg-secondary">${transacao.categoria}</span></td>
+                    <td>
+                        <span class="badge ${transacao.tipo === 'receita' ? 'badge-receita' : 'badge-despesa'}">
+                            ${transacao.tipo === 'receita' ? 'Receita' : 'Despesa'}
+                        </span>
+                    </td>
+                    <td class="text-end fw-bold ${transacao.tipo === 'receita' ? 'text-success' : 'text-danger'}">
+                        ${transacao.tipo === 'receita' ? '+' : '-'} ${formatarMoeda(transacao.valor)}
+                    </td>
+                </tr>
+            `;
+        });
+    }
+
+    html += `
+                        </tbody>
+                        <tfoot class="table-group-divider">
+                            <tr>
+                                <td colspan="3"></td>
+                                <td class="text-end"><strong>Total Receitas:</strong></td>
+                                <td class="text-end text-success"><strong>+ ${formatarMoeda(totalReceitas)}</strong></td>
+                            </tr>
+                            <tr>
+                                <td colspan="3"></td>
+                                <td class="text-end"><strong>Total Despesas:</strong></td>
+                                <td class="text-end text-danger"><strong>- ${formatarMoeda(totalDespesas)}</strong></td>
+                            </tr>
+                            <tr class="table-active">
+                                <td colspan="3"></td>
+                                <td class="text-end"><strong>Saldo Final:</strong></td>
+                                <td class="text-end ${saldo >= 0 ? 'text-success' : 'text-danger'}">
+                                    <strong>${formatarMoeda(saldo)}</strong>
+                                </td>
+                            </tr>
+                        </tfoot>
+                    </table>
+                </div>
+            </div>
+        </div>
+    `;
+
+    resultadoDiv.innerHTML = html;
 }
 
-// Exportar para PDF
+
 function exportarPDF() {
     if (!dadosRelatorio) {
         mostrarMensagem('Gere um relatório primeiro!', 'warning');
@@ -496,90 +551,6 @@ function exportarPDF() {
     window.open(url, '_blank');
 }
 
-// Imprimir relatório
 function imprimirRelatorio() {
-    if (!dadosRelatorio) {
-        mostrarMensagem('Gere um relatório primeiro!', 'warning');
-        return;
-    }
-    
-    const modal = new bootstrap.Modal(document.getElementById('modalRelatorio'));
-    const conteudoModal = document.getElementById('conteudo-modal-relatorio');
-    
-    // Preparar conteúdo para impressão
-    const dataInicio = formatarData(dadosRelatorio.periodo.inicio);
-    const dataFim = formatarData(dadosRelatorio.periodo.fim);
-    
-    let html = `
-        <div class="print-container">
-            <div class="text-center mb-4">
-                <h4>Relatório Financeiro Detalhado</h4>
-                <p class="mb-1"><strong>Período:</strong> ${dataInicio} a ${dataFim}</p>
-                <p class="mb-3"><strong>Data de emissão:</strong> ${new Date().toLocaleDateString('pt-BR')}</p>
-            </div>
-            
-            <table class="table table-bordered">
-                <thead>
-                    <tr>
-                        <th>Data</th>
-                        <th>Descrição</th>
-                        <th>Categoria</th>
-                        <th>Tipo</th>
-                        <th class="text-end">Valor (R$)</th>
-                    </tr>
-                </thead>
-                <tbody>
-    `;
-    
-    dadosRelatorio.transacoes.forEach(transacao => {
-        html += `
-            <tr>
-                <td>${formatarData(transacao.data)}</td>
-                <td>${transacao.descricao}</td>
-                <td>${transacao.categoria}</td>
-                <td>${transacao.tipo === 'receita' ? 'Receita' : 'Despesa'}</td>
-                <td class="text-end">${transacao.valor.toFixed(2)}</td>
-            </tr>
-        `;
-    });
-    
-    const totais = dadosRelatorio.totais;
-    const totalReceitas = totais.receita ? totais.receita.total : 0;
-    const totalDespesas = totais.despesa ? totais.despesa.total : 0;
-    const saldo = totalReceitas - totalDespesas;
-    
-    html += `
-                </tbody>
-                <tfoot>
-                    <tr>
-                        <td colspan="4" class="text-end"><strong>Total Receitas:</strong></td>
-                        <td class="text-end"><strong>${totalReceitas.toFixed(2)}</strong></td>
-                    </tr>
-                    <tr>
-                        <td colspan="4" class="text-end"><strong>Total Despesas:</strong></td>
-                        <td class="text-end"><strong>${totalDespesas.toFixed(2)}</strong></td>
-                    </tr>
-                    <tr>
-                        <td colspan="4" class="text-end"><strong>Saldo Final:</strong></td>
-                        <td class="text-end"><strong>${saldo.toFixed(2)}</strong></td>
-                    </tr>
-                </tfoot>
-            </table>
-        </div>
-    `;
-    
-    conteudoModal.innerHTML = html;
-    modal.show();
+    window.print();
 }
-
-// Atualizar a inicialização para incluir o relatório
-document.addEventListener('DOMContentLoaded', function() {
-    carregarDados();
-    configurarFormulario();
-    configurarFormularioRelatorio(); // Nova função
-    
-    // Atualizar dados a cada 30 segundos
-    setInterval(carregarDados, 30000);
-});
-
-// ... (restante das funções anteriores mantidas)

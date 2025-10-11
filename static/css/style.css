@@ -1,128 +1,54 @@
-:root {
-    --primary-color: #3498db;
-    --success-color: #27ae60;
-    --danger-color: #e74c3c;
-    --warning-color: #f39c12;
-    --info-color: #17a2b8;
-}
+/* ... (demais estilos mantidos) */
 
-body {
-    background-color: #f8f9fa;
-    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-}
+/* SUBSTITUA OS ESTILOS ANTERIORES DOS CARDS POR ESTES */
 
-.card {
+/* Estilos para os Cards de Resumo (Dashboard) */
+.summary-card {
     border: none;
-    border-radius: 10px;
-    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-    transition: transform 0.2s;
+    border-radius: 12px;
+    color: white;
+    position: relative;
+    overflow: hidden;
+    transition: transform 0.3s ease, box-shadow 0.3s ease, background 0.5s ease;
 }
 
-.card:hover {
-    transform: translateY(-2px);
+.summary-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 12px 24px rgba(0,0,0,0.2);
 }
 
-.transacao-item {
-    border-left: 4px solid;
-    padding: 10px 15px;
-    margin-bottom: 10px;
-    border-radius: 5px;
-    background: white;
+.summary-card .card-body {
+    padding: 1.5rem;
 }
 
-.transacao-receita {
-    border-left-color: var(--success-color);
+.card-receitas {
+    background: linear-gradient(135deg, #28a745, #20c997);
 }
 
-.transacao-despesa {
-    border-left-color: var(--danger-color);
+.card-despesas {
+    background: linear-gradient(135deg, #dc3545, #e83e8c);
 }
 
-.btn-action {
-    padding: 2px 8px;
-    margin-left: 5px;
+/* Novas classes para o card de Saldo */
+.card-saldo.positive-saldo {
+    background: linear-gradient(135deg, #4e54c8, #8f94fb);
 }
 
-/* Responsividade */
-@media (max-width: 768px) {
-    .container-fluid {
-        padding: 10px;
-    }
-    
-    .card-body {
-        padding: 15px;
-    }
-    
-    .transacao-item {
-        padding: 8px 12px;
-    }
+.card-saldo.negative-saldo {
+    background: linear-gradient(135deg, #f39c12, #fd7e14);
 }
 
-/* Animações */
-.fade-in {
-    animation: fadeIn 0.5s ease-in;
+.summary-card .card-title {
+    font-size: 1rem;
+    font-weight: 400;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    opacity: 0.9;
 }
 
-@keyframes fadeIn {
-    from { opacity: 0; transform: translateY(10px); }
-    to { opacity: 1; transform: translateY(0); }
-}
-
-/* ... (estilos anteriores mantidos) */
-
-/* Estilos para Relatório */
-#tabela-relatorio th {
-    font-size: 0.85rem;
+.summary-card .card-text {
+    font-size: 2.5rem;
     font-weight: 600;
 }
 
-#tabela-relatorio td {
-    font-size: 0.8rem;
-    vertical-align: middle;
-}
-
-.badge-receita {
-    background-color: var(--success-color);
-}
-
-.badge-despesa {
-    background-color: var(--danger-color);
-}
-
-/* Estilos para impressão */
-@media print {
-    .navbar, .card-header, .btn, .modal-footer {
-        display: none !important;
-    }
-    
-    .modal-body {
-        display: block !important;
-    }
-    
-    .table-responsive {
-        overflow: visible !important;
-    }
-}
-
-/* Cards de resumo do relatório */
-.card-resumo {
-    border: none;
-    border-radius: 8px;
-    transition: transform 0.2s;
-}
-
-.card-resumo:hover {
-    transform: translateY(-2px);
-}
-
-/* Loading para relatório */
-.loading-relatorio {
-    display: none;
-    text-align: center;
-    padding: 2rem;
-}
-
-.loading-relatorio .spinner {
-    width: 3rem;
-    height: 3rem;
-}
+/* Fim da substituição */
