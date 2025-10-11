@@ -1,6 +1,76 @@
-/* ... (demais estilos mantidos) */
+/* Definição de variáveis para o tema claro (padrão) */
+:root {
+    --primary-color: #0d6efd;
+    --background-color: #f8f9fa;
+    --card-background-color: #ffffff;
+    --text-color: #212529;
+    --muted-text-color: #6c757d;
+    --border-color: #dee2e6;
+    --header-background-color: #f1f3f5;
+}
 
-/* SUBSTITUA OS ESTILOS ANTERIORES DOS CARDS POR ESTES */
+/* Definição de variáveis para o tema escuro */
+[data-theme="dark"] {
+    --primary-color: #4a90e2;
+    --background-color: #121212;
+    --card-background-color: #1e1e1e;
+    --text-color: #e0e0e0;
+    --muted-text-color: #a0a0a0;
+    --border-color: #444;
+    --header-background-color: #2a2a2a;
+}
+
+body {
+    background-color: var(--background-color);
+    color: var(--text-color);
+    transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+.card {
+    background-color: var(--card-background-color);
+    border: 1px solid var(--border-color);
+    color: var(--text-color);
+    transition: background-color 0.3s ease;
+}
+
+.card-header {
+    background-color: var(--header-background-color);
+    border-bottom: 1px solid var(--border-color);
+}
+
+.text-muted {
+    color: var(--muted-text-color) !important;
+}
+
+.table {
+    color: var(--text-color);
+}
+
+.table-light {
+    --bs-table-bg: var(--header-background-color);
+    --bs-table-border-color: var(--border-color);
+}
+
+.table-striped>tbody>tr:nth-of-type(odd)>* {
+    --bs-table-accent-bg: rgba(0, 0, 0, 0.02);
+}
+
+[data-theme="dark"] .table-striped>tbody>tr:nth-of-type(odd)>* {
+    --bs-table-accent-bg: rgba(255, 255, 255, 0.05);
+}
+
+.form-control, .form-select {
+    background-color: var(--card-background-color);
+    color: var(--text-color);
+    border: 1px solid var(--border-color);
+}
+
+.form-control:focus, .form-select:focus {
+    background-color: var(--card-background-color);
+    color: var(--text-color);
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 0.25rem rgba(var(--primary-color), 0.25);
+}
 
 /* Estilos para os Cards de Resumo (Dashboard) */
 .summary-card {
@@ -29,7 +99,6 @@
     background: linear-gradient(135deg, #dc3545, #e83e8c);
 }
 
-/* Novas classes para o card de Saldo */
 .card-saldo.positive-saldo {
     background: linear-gradient(135deg, #4e54c8, #8f94fb);
 }
@@ -51,4 +120,46 @@
     font-weight: 600;
 }
 
-/* Fim da substituição */
+/* --- MELHORIA PARA CARDS DE RELATÓRIO NO MODO ESCURO --- */
+
+/* Estilo base para os cards de resumo do relatório */
+.card-resumo .card-body {
+    padding: 1rem;
+}
+
+.card-resumo h3 {
+    font-size: 1.75rem;
+    font-weight: 600;
+}
+
+/* Cores específicas para o modo escuro */
+[data-theme="dark"] .card-resumo.bg-light {
+    background-color: #3a3a3a !important; /* Cor mais escura para o fundo "light" */
+    border: 1px solid #555;
+}
+
+[data-theme="dark"] .card-resumo.bg-success.bg-opacity-10 {
+    background-color: rgba(40, 167, 69, 0.2) !important;
+    border: 1px solid rgba(40, 167, 69, 0.6);
+}
+
+[data-theme="dark"] .card-resumo.bg-danger.bg-opacity-10 {
+    background-color: rgba(220, 53, 69, 0.2) !important;
+    border: 1px solid rgba(220, 53, 69, 0.6);
+}
+
+[data-theme="dark"] .card-resumo.bg-info.bg-opacity-10 {
+    background-color: rgba(13, 202, 240, 0.2) !important;
+    border: 1px solid rgba(13, 202, 240, 0.6);
+}
+
+[data-theme="dark"] .card-resumo.bg-warning.bg-opacity-10 {
+    background-color: rgba(255, 193, 7, 0.2) !important;
+    border: 1px solid rgba(255, 193, 7, 0.6);
+}
+
+[data-theme="dark"] .card-resumo .text-primary { color: #5dade2 !important; }
+[data-theme="dark"] .card-resumo .text-success { color: #58d68d !important; }
+[data-theme="dark"] .card-resumo .text-danger  { color: #ec7063 !important; }
+[data-theme="dark"] .card-resumo .text-info    { color: #5dade2 !important; }
+[data-theme="dark"] .card-resumo .text-warning { color: #f4d03f !important; }

@@ -5,12 +5,12 @@ let anexoModal = null; // Para guardar a instância do modal
 // Inicialização
 document.addEventListener('DOMContentLoaded', function() {
     
+    configurarThemeSwitcher(); // 1. Garante que a lógica do tema é iniciada
+
     // --- Lógica para a Página Index (Dashboard) ---
-    // A forma mais fiável de detetar a página inicial é verificar a existência dos seus elementos únicos.
     const dashboardElement = document.getElementById('total-receitas');
     if (dashboardElement) {
         carregarDadosDashboard();
-        // Atualiza os dados do dashboard a cada 30 segundos
         setInterval(carregarDadosDashboard, 30000);
     }
 
@@ -28,6 +28,41 @@ document.addEventListener('DOMContentLoaded', function() {
         configurarFormularioRelatorio();
     }
 });
+
+// --- Lógica do Tema Claro/Escuro ---
+function configurarThemeSwitcher() {
+    const themeSwitcher = document.getElementById('theme-switcher');
+    if (!themeSwitcher) return; // Se o botão não existir, para a execução
+
+    const themeIcon = themeSwitcher.querySelector('i');
+    const html = document.documentElement;
+
+    // Carrega o tema salvo no localStorage ou usa 'light' como padrão
+    const savedTheme = localStorage.getItem('theme') || 'light';
+    html.setAttribute('data-theme', savedTheme);
+    if(themeIcon) {
+        themeIcon.className = savedTheme === 'dark' ? 'fas fa-sun' : 'fas fa-moon';
+    }
+
+    // Adiciona o evento de clique ao botão
+    themeSwitcher.addEventListener('click', () => {
+        const currentTheme = html.getAttribute('data-theme');
+        const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+        
+        html.setAttribute('data-theme', newTheme);
+        localStorage.setItem('theme', newTheme);
+
+        if(themeIcon) {
+            themeIcon.className = newTheme === 'dark' ? 'fas fa-sun' : 'fas fa-moon';
+        }
+        
+        // Se estiver na dashboard, recarrega os gráficos para aplicar as cores do novo tema
+        if (document.getElementById('grafico-mensal')) {
+            carregarGraficos();
+        }
+    });
+}
+
 
 // Carrega os dados APENAS para o dashboard
 function carregarDadosDashboard() {
@@ -102,30 +137,13 @@ async function carregarSaldo() {
         const response = await fetch('/api/relatorios/saldo');
         const saldo = await response.json();
         
-        // Debug: verifique a estrutura real dos dados
-        console.log('Dados do saldo:', saldo);
+        let receitas = saldo.receitas || 0;
+        let despesas = saldo.despesas || 0;
+        let saldoTotal = saldo.saldo || (receitas - despesas);
         
-        // Ajuste para diferentes estruturas possíveis da API
-        let receitas, despesas, saldoTotal;
-        
-        if (saldo.geral) {
-            // Estrutura com objeto "geral"
-            receitas = saldo.geral.receitas || 0;
-            despesas = saldo.geral.despesas || 0;
-            saldoTotal = saldo.geral.saldo || (receitas - despesas);
-        } else {
-            // Estrutura direta
-            receitas = saldo.receitas || saldo.total_receitas || 0;
-            despesas = saldo.despesas || saldo.total_despesas || 0;
-            saldoTotal = saldo.saldo || (receitas - despesas);
-        }
-        
-        document.getElementById('total-receitas').textContent = 
-            formatarMoeda(receitas);
-        document.getElementById('total-despesas').textContent = 
-            formatarMoeda(despesas);
-        document.getElementById('saldo-total').textContent = 
-            formatarMoeda(saldoTotal);
+        document.getElementById('total-receitas').textContent = formatarMoeda(receitas);
+        document.getElementById('total-despesas').textContent = formatarMoeda(despesas);
+        document.getElementById('saldo-total').textContent = formatarMoeda(saldoTotal);
             
         const cardSaldo = document.querySelector('.card-saldo');
         if (cardSaldo) {
@@ -140,10 +158,6 @@ async function carregarSaldo() {
             
     } catch (error) {
         console.error('Erro ao carregar saldo:', error);
-        // Valores padrão em caso de erro
-        document.getElementById('total-receitas').textContent = formatarMoeda(0);
-        document.getElementById('total-despesas').textContent = formatarMoeda(0);
-        document.getElementById('saldo-total').textContent = formatarMoeda(0);
     }
 }
 
@@ -166,7 +180,8 @@ async function carregarGraficoMensal() {
         const trace2 = { x: meses, y: despesas, name: 'Despesas', type: 'bar', marker: { color: '#e74c3c' } };
         const trace3 = { x: meses, y: saldos, name: 'Saldo', type: 'line', marker: { color: '#3498db' }, line: { width: 4 } };
         
-        const layout = { barmode: 'group', showlegend: true, legend: { orientation: 'h' }, margin: { t: 0, r: 0, b: 30, l: 40 }, paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)' };
+        const layout = getLayoutGrafico();
+        layout.barmode = 'group';
         
         Plotly.newPlot('grafico-mensal', [trace1, trace2, trace3], layout, { responsive: true, displayModeBar: false });
         
@@ -183,13 +198,38 @@ async function carregarGraficoCategorias() {
         const trace1 = { labels: dados.receitas.map(item => item.categoria), values: dados.receitas.map(item => item.total), name: 'Receitas', type: 'pie', hole: 0.4, domain: { row: 0, column: 0 }, marker: { colors: ['#27ae60', '#2ecc71', '#1abc9c', '#16a085'] } };
         const trace2 = { labels: dados.despesas.map(item => item.categoria), values: dados.despesas.map(item => item.total), name: 'Despesas', type: 'pie', hole: 0.4, domain: { row: 0, column: 1 }, marker: { colors: ['#e74c3c', '#c0392b', '#d35400', '#e67e22'] } };
         
-        const layout = { grid: { rows: 1, columns: 2 }, showlegend: true, paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)' };
+        const layout = getLayoutGrafico();
+        layout.grid = { rows: 1, columns: 2 };
         
         Plotly.newPlot('grafico-categorias', [trace1, trace2], layout, { responsive: true, displayModeBar: false });
         
     } catch (error) {
         console.error('Erro ao carregar gráfico de categorias:', error);
     }
+}
+
+function getLayoutGrafico() {
+    const isDarkMode = document.documentElement.getAttribute('data-theme') === 'dark';
+    const textColor = isDarkMode ? '#e0e0e0' : '#212529';
+    
+    return {
+        showlegend: true,
+        legend: { 
+            orientation: 'h',
+            font: { color: textColor }
+        },
+        margin: { t: 20, r: 20, b: 30, l: 40 },
+        paper_bgcolor: 'rgba(0,0,0,0)',
+        plot_bgcolor: 'rgba(0,0,0,0)',
+        xaxis: {
+            tickfont: { color: textColor },
+            gridcolor: isDarkMode ? '#444' : '#dee2e6'
+        },
+        yaxis: {
+            tickfont: { color: textColor },
+            gridcolor: isDarkMode ? '#444' : '#dee2e6'
+        }
+    };
 }
 
 // Funções de transações
@@ -222,7 +262,7 @@ async function adicionarTransacao() {
             form.reset();
             document.getElementById('data').value = new Date().toISOString().split('T')[0];
             mostrarMensagem('Transação adicionada com sucesso!', 'success');
-            carregarTransacoes(); // Apenas atualiza a lista de transações na mesma página
+            carregarTransacoes(); 
         } else {
             throw new Error(result.error);
         }
@@ -245,7 +285,7 @@ async function excluirTransacao(id) {
         const result = await response.json();
         
         if (result.success) {
-            carregarTransacoes(); // Atualiza a lista na página
+            carregarTransacoes();
             mostrarMensagem('Transação excluída com sucesso!', 'success');
         } else {
             throw new Error(result.error);
@@ -390,7 +430,6 @@ async function gerarRelatorio() {
     }
     
     const resultadoDiv = document.getElementById('resultado-relatorio');
-    resultadoDiv.innerHTML = `<div class="text-center py-5"><div class="spinner-border text-primary" role="status"><span class="visually-hidden">A carregar...</span></div></div>`;
     resultadoDiv.style.display = 'block';
     
     try {
@@ -400,7 +439,6 @@ async function gerarRelatorio() {
     } catch (error) {
         console.error('Erro ao gerar relatório:', error);
         mostrarMensagem('Erro ao gerar relatório!', 'danger');
-        resultadoDiv.innerHTML = `<div class="alert alert-danger">Erro ao carregar dados.</div>`;
     }
 }
 
