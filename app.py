@@ -1,8 +1,21 @@
-from flask import Flask, render_template, request, jsonify, redirect, url_for, make_response
+from flask import Flask, render_template, request, jsonify, redirect, url_for, make_response, send_from_directory
 from datetime import datetime, timedelta
 import sqlite3
 import io
 import json
+import os
+import re
+from werkzeug.utils import secure_filename
+
+# --- Bibliotecas para OCR ---
+from PIL import Image
+import pytesseract
+from pdf2image import convert_from_path
+
+# Se você instalou o Tesseract em um local não padrão no Windows, descomente e ajuste a linha abaixo:
+# pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
+# -----------------------------
+
 from reportlab.lib.pagesizes import A4, letter
 from reportlab.pdfgen import canvas
 from reportlab.lib.utils import ImageReader
@@ -14,6 +27,19 @@ from reportlab.pdfbase.ttfonts import TTFont
 
 app = Flask(__name__)
 app.secret_key = 'livro_caixa_financeiro_2024'
+
+# --- Configurações de Upload ---
+UPLOAD_FOLDER = 'uploads'
+ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'pdf'}
+app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+
+if not os.path.exists(UPLOAD_FOLDER):
+    os.makedirs(UPLOAD_FOLDER)
+
+def allowed_file(filename):
+    return '.' in filename and \
+           filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+# --------------------------------
 
 # Configuração do banco de dados
 def get_db_connection():
@@ -33,6 +59,9 @@ def init_db():
             tipo TEXT NOT NULL CHECK(tipo IN ('receita', 'despesa')),
             categoria TEXT NOT NULL,
             data DATE NOT NULL,
+            forma_pagamento TEXT,
+            anexo TEXT,
+            observacoes TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
@@ -81,8 +110,14 @@ def init_db():
     conn.commit()
     conn.close()
 
+# Rota para servir os arquivos de anexo
+@app.route('/uploads/<filename>')
+def uploaded_file(filename):
+    return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
+
 # Rotas principais
 @app.route('/')
+@app.route('/index') # >>> ROTA ADICIONADA PARA CONSISTÊNCIA <<<
 def index():
     return render_template('index.html')
 
@@ -94,56 +129,89 @@ def lancamentos():
 def relatorios():
     return render_template('relatorios.html')
 
+# >>> ROTA PARA OCR CORRIGIDA <<<
+@app.route('/api/ocr/processar', methods=['POST'])
+def processar_ocr():
+    if 'anexo' not in request.files:
+        return jsonify({'success': False, 'error': 'Nenhum arquivo enviado.'})
+
+    file = request.files['anexo']
+    if file.filename == '' or not allowed_file(file.filename):
+        return jsonify({'success': False, 'error': 'Arquivo inválido ou não permitido.'})
+
+    try:
+        filename = secure_filename(file.filename)
+        filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+        file.save(filepath)
+
+        text = ''
+        # CORREÇÃO: 'endsWith' -> 'endswith' (minúsculo)
+        if filename.lower().endswith('.pdf'):
+            pages = convert_from_path(filepath, 200)
+            for page in pages:
+                text += pytesseract.image_to_string(page, lang='por') + '\n'
+        else:
+            text = pytesseract.image_to_string(Image.open(filepath), lang='por')
+        
+        matches = re.findall(r'(\d+[\.,]\d{2})', text)
+        valor_encontrado = 0.0
+        if matches:
+            max_valor = 0
+            for match in matches:
+                valor_numerico = float(match.replace(',', '.'))
+                if valor_numerico > max_valor:
+                    max_valor = valor_numerico
+            valor_encontrado = max_valor
+
+        return jsonify({'success': True, 'valor': valor_encontrado, 'texto': text})
+    except Exception as e:
+        return jsonify({'success': False, 'error': f'Erro ao processar o arquivo: {str(e)}'})
+
 # API para transações
 @app.route('/api/transacoes', methods=['GET', 'POST'])
 def api_transacoes():
     conn = get_db_connection()
     
     if request.method == 'GET':
-        limit = request.args.get('limit', type=int)
-        
         query = '''
             SELECT t.*, c.cor 
             FROM transacoes t 
             LEFT JOIN categorias c ON t.categoria = c.nome AND t.tipo = c.tipo
             ORDER BY t.data DESC, t.id DESC
         '''
-        params = []
-        if limit:
-            query += ' LIMIT ?'
-            params.append(limit)
-            
-        transacoes = conn.execute(query, params).fetchall()
+        transacoes = conn.execute(query).fetchall()
         
         result = []
         for transacao in transacoes:
-            result.append({
-                'id': transacao['id'],
-                'descricao': transacao['descricao'],
-                'valor': float(transacao['valor']),
-                'tipo': transacao['tipo'],
-                'categoria': transacao['categoria'],
-                'cor': transacao['cor'] or '#6c757d',
-                'data': transacao['data'],
-                'created_at': transacao['created_at']
-            })
+            transacao_dict = dict(transacao)
+            transacao_dict['valor'] = float(transacao_dict['valor'])
+            result.append(transacao_dict)
         
         conn.close()
         return jsonify(result)
     
     elif request.method == 'POST':
-        data = request.get_json()
-        
         try:
+            descricao = request.form['descricao']
+            valor = request.form['valor']
+            tipo = request.form['tipo']
+            categoria = request.form['categoria']
+            data = request.form['data']
+            forma_pagamento = request.form.get('forma_pagamento')
+            observacoes = request.form.get('observacoes')
+            
+            anexo_filename = None
+            if 'anexo' in request.files:
+                file = request.files['anexo']
+                if file and file.filename and allowed_file(file.filename):
+                    anexo_filename = secure_filename(file.filename)
+                    file.save(os.path.join(app.config['UPLOAD_FOLDER'], anexo_filename))
+
             conn.execute('''
-                INSERT INTO transacoes (descricao, valor, tipo, categoria, data)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO transacoes (descricao, valor, tipo, categoria, data, forma_pagamento, anexo, observacoes)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
-                data['descricao'],
-                data['valor'],
-                data['tipo'],
-                data['categoria'],
-                data['data']
+                descricao, valor, tipo, categoria, data, forma_pagamento, anexo_filename, observacoes
             ))
             conn.commit()
             conn.close()
@@ -152,73 +220,32 @@ def api_transacoes():
             conn.close()
             return jsonify({'success': False, 'error': str(e)})
 
-@app.route('/api/transacoes/<int:id>', methods=['PUT', 'DELETE'])
-def transacao_detail(id):
+@app.route('/api/transacoes/<int:id>', methods=['DELETE'])
+def api_excluir_transacao(id):
     conn = get_db_connection()
-    
-    if request.method == 'PUT':
-        data = request.get_json()
+    try:
+        # Primeiro, verifique se existe um anexo para excluir
+        transacao = conn.execute('SELECT anexo FROM transacoes WHERE id = ?', (id,)).fetchone()
         
-        try:
-            conn.execute('''
-                UPDATE transacoes 
-                SET descricao = ?, valor = ?, tipo = ?, categoria = ?, data = ?
-                WHERE id = ?
-            ''', (
-                data['descricao'],
-                data['valor'],
-                data['tipo'],
-                data['categoria'],
-                data['data'],
-                id
-            ))
-            conn.commit()
-            conn.close()
-            return jsonify({'success': True, 'message': 'Transação atualizada com sucesso!'})
-        except Exception as e:
-            conn.close()
-            return jsonify({'success': False, 'error': str(e)})
-    
-    elif request.method == 'DELETE':
-        try:
-            conn.execute('DELETE FROM transacoes WHERE id = ?', (id,))
-            conn.commit()
-            conn.close()
-            return jsonify({'success': True, 'message': 'Transação excluída com sucesso!'})
-        except Exception as e:
-            conn.close()
-            return jsonify({'success': False, 'error': str(e)})
+        if transacao and transacao['anexo']:
+            anexo_path = os.path.join(app.config['UPLOAD_FOLDER'], transacao['anexo'])
+            if os.path.exists(anexo_path):
+                os.remove(anexo_path)
+        
+        conn.execute('DELETE FROM transacoes WHERE id = ?', (id,))
+        conn.commit()
+        conn.close()
+        return jsonify({'success': True, 'message': 'Transação excluída com sucesso!'})
+    except Exception as e:
+        conn.close()
+        return jsonify({'success': False, 'error': str(e)})
 
-# API para categorias
-@app.route('/api/categorias')
-def api_categorias():
-    conn = get_db_connection()
-    
-    categorias = conn.execute('''
-        SELECT * FROM categorias ORDER BY tipo, nome
-    ''').fetchall()
-    
-    result = {
-        'receita': [],
-        'despesa': []
-    }
-    
-    for categoria in categorias:
-        result[categoria['tipo']].append({
-            'id': categoria['id'],
-            'nome': categoria['nome'],
-            'cor': categoria['cor']
-        })
-    
-    conn.close()
-    return jsonify(result)
-
-# API para relatórios e dashboard
+# API para relatórios
 @app.route('/api/relatorios/saldo')
-def saldo_total():
+def api_saldo():
     conn = get_db_connection()
     
-    # Saldo total
+    # Calcular totais
     receitas = conn.execute(
         'SELECT SUM(valor) as total FROM transacoes WHERE tipo = "receita"'
     ).fetchone()['total'] or 0
@@ -227,167 +254,98 @@ def saldo_total():
         'SELECT SUM(valor) as total FROM transacoes WHERE tipo = "despesa"'
     ).fetchone()['total'] or 0
     
-    saldo = float(receitas) - float(despesas)
-    
-    # Últimos 30 dias
-    data_30_dias = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
-    
-    receitas_30 = conn.execute(
-        'SELECT SUM(valor) as total FROM transacoes WHERE tipo = "receita" AND data >= ?',
-        (data_30_dias,)
-    ).fetchone()['total'] or 0
-    
-    despesas_30 = conn.execute(
-        'SELECT SUM(valor) as total FROM transacoes WHERE tipo = "despesa" AND data >= ?',
-        (data_30_dias,)
-    ).fetchone()['total'] or 0
-    
-    saldo_30 = float(receitas_30) - float(despesas_30)
+    saldo = receitas - despesas
     
     conn.close()
     
     return jsonify({
-        'geral': {
-            'receitas': float(receitas),
-            'despesas': float(despesas),
-            'saldo': saldo
-        },
-        'ultimos_30_dias': {
-            'receitas': float(receitas_30),
-            'despesas': float(despesas_30),
-            'saldo': saldo_30
-        }
-    })
-
-@app.route('/api/relatorios/categorias')
-def relatorio_categorias():
-    conn = get_db_connection()
-    
-    categorias_receita = conn.execute('''
-        SELECT categoria, SUM(valor) as total, COUNT(*) as quantidade,
-               (SELECT cor FROM categorias WHERE nome = transacoes.categoria AND tipo = 'receita' LIMIT 1) as cor
-        FROM transacoes 
-        WHERE tipo = "receita" 
-        GROUP BY categoria
-        ORDER BY total DESC
-    ''').fetchall()
-    
-    categorias_despesa = conn.execute('''
-        SELECT categoria, SUM(valor) as total, COUNT(*) as quantidade,
-               (SELECT cor FROM categorias WHERE nome = transacoes.categoria AND tipo = 'despesa' LIMIT 1) as cor
-        FROM transacoes 
-        WHERE tipo = "despesa" 
-        GROUP BY categoria
-        ORDER BY total DESC
-    ''').fetchall()
-    
-    conn.close()
-    
-    return jsonify({
-        'receitas': [{
-            'categoria': cat['categoria'],
-            'total': float(cat['total']),
-            'quantidade': cat['quantidade'],
-            'cor': cat['cor'] or '#28a745'
-        } for cat in categorias_receita],
-        'despesas': [{
-            'categoria': cat['categoria'],
-            'total': float(cat['total']),
-            'quantidade': cat['quantidade'],
-            'cor': cat['cor'] or '#dc3545'
-        } for cat in categorias_despesa]
+        'receitas': float(receitas),
+        'despesas': float(despesas),
+        'saldo': float(saldo)
     })
 
 @app.route('/api/relatorios/mensal')
-def relatorio_mensal():
+def api_mensal():
     conn = get_db_connection()
     
-    # Últimos 6 meses
-    meses = []
-    for i in range(5, -1, -1):
-        date = datetime.now() - timedelta(days=30*i)
-        meses.append(date.strftime('%Y-%m'))
+    query = '''
+        SELECT 
+            strftime('%Y-%m', data) as mes,
+            SUM(CASE WHEN tipo = 'receita' THEN valor ELSE 0 END) as receitas,
+            SUM(CASE WHEN tipo = 'despesa' THEN valor ELSE 0 END) as despesas,
+            SUM(CASE WHEN tipo = 'receita' THEN valor ELSE -valor END) as saldo
+        FROM transacoes
+        GROUP BY mes
+        ORDER BY mes DESC
+        LIMIT 12
+    '''
     
-    dados_mensais = []
+    resultados = conn.execute(query).fetchall()
+    conn.close()
     
-    for mes in meses:
-        receitas = conn.execute('''
-            SELECT SUM(valor) as total FROM transacoes 
-            WHERE tipo = "receita" AND strftime('%Y-%m', data) = ?
-        ''', (mes,)).fetchone()['total'] or 0
-        
-        despesas = conn.execute('''
-            SELECT SUM(valor) as total FROM transacoes 
-            WHERE tipo = "despesa" AND strftime('%Y-%m', data) = ?
-        ''', (mes,)).fetchone()['total'] or 0
-        
-        # Quantidade de transações
-        qtd_receitas = conn.execute('''
-            SELECT COUNT(*) as total FROM transacoes 
-            WHERE tipo = "receita" AND strftime('%Y-%m', data) = ?
-        ''', (mes,)).fetchone()['total'] or 0
-        
-        qtd_despesas = conn.execute('''
-            SELECT COUNT(*) as total FROM transacoes 
-            WHERE tipo = "despesa" AND strftime('%Y-%m', data) = ?
-        ''', (mes,)).fetchone()['total'] or 0
-        
-        dados_mensais.append({
-            'mes': mes,
-            'receitas': float(receitas),
-            'despesas': float(despesas),
-            'saldo': float(receitas) - float(despesas),
-            'quantidade_transacoes': qtd_receitas + qtd_despesas
+    dados = []
+    for row in resultados:
+        dados.append({
+            'mes': row['mes'],
+            'receitas': float(row['receitas']),
+            'despesas': float(row['despesas']),
+            'saldo': float(row['saldo'])
         })
     
-    conn.close()
-    return jsonify(dados_mensais)
+    return jsonify(dados[::-1])  # Inverter para ordem cronológica
 
-# NOVAS ROTAS PARA RELATÓRIOS DETALHADOS
+@app.route('/api/relatorios/categorias')
+def api_categorias():
+    conn = get_db_connection()
+    
+    receitas = conn.execute('''
+        SELECT categoria, SUM(valor) as total 
+        FROM transacoes 
+        WHERE tipo = 'receita' 
+        GROUP BY categoria 
+        ORDER BY total DESC
+    ''').fetchall()
+    
+    despesas = conn.execute('''
+        SELECT categoria, SUM(valor) as total 
+        FROM transacoes 
+        WHERE tipo = 'despesa' 
+        GROUP BY categoria 
+        ORDER BY total DESC
+    ''').fetchall()
+    
+    conn.close()
+    
+    return jsonify({
+        'receitas': [dict(row) for row in receitas],
+        'despesas': [dict(row) for row in despesas]
+    })
+
 @app.route('/api/relatorios/detalhado')
-def relatorio_detalhado():
+def api_relatorio_detalhado():
     data_inicio = request.args.get('data_inicio')
     data_fim = request.args.get('data_fim')
     tipo = request.args.get('tipo', 'todos')
-    categoria = request.args.get('categoria', 'todas')
     
     conn = get_db_connection()
     
-    # Construir query dinâmica
+    # Construir query base
     query = '''
-        SELECT t.*, c.cor 
-        FROM transacoes t 
-        LEFT JOIN categorias c ON t.categoria = c.nome AND t.tipo = c.tipo
-        WHERE t.data BETWEEN ? AND ?
+        SELECT * FROM transacoes 
+        WHERE data BETWEEN ? AND ?
     '''
     params = [data_inicio, data_fim]
     
     if tipo != 'todos':
-        query += ' AND t.tipo = ?'
+        query += ' AND tipo = ?'
         params.append(tipo)
     
-    if categoria != 'todas':
-        query += ' AND t.categoria = ?'
-        params.append(categoria)
-    
-    query += ' ORDER BY t.data, t.id'
+    query += ' ORDER BY data DESC, id DESC'
     
     transacoes = conn.execute(query, params).fetchall()
     
-    result = []
-    for transacao in transacoes:
-        result.append({
-            'id': transacao['id'],
-            'descricao': transacao['descricao'],
-            'valor': float(transacao['valor']),
-            'tipo': transacao['tipo'],
-            'categoria': transacao['categoria'],
-            'cor': transacao['cor'] or '#6c757d',
-            'data': transacao['data']
-        })
-    
-    # Calcular totais
-    query_totais = '''
+    # Calcular totais por tipo
+    totais_query = '''
         SELECT 
             tipo,
             COUNT(*) as quantidade,
@@ -395,264 +353,42 @@ def relatorio_detalhado():
         FROM transacoes 
         WHERE data BETWEEN ? AND ?
     '''
-    params_totais = [data_inicio, data_fim]
+    totais_params = [data_inicio, data_fim]
     
     if tipo != 'todos':
-        query_totais += ' AND tipo = ?'
-        params_totais.append(tipo)
+        totais_query += ' AND tipo = ?'
+        totais_params.append(tipo)
     
-    if categoria != 'todas':
-        query_totais += ' AND categoria = ?'
-        params_totais.append(categoria)
+    totais_query += ' GROUP BY tipo'
     
-    query_totais += ' GROUP BY tipo'
+    totais_result = conn.execute(totais_query, totais_params).fetchall()
     
-    totais = conn.execute(query_totais, params_totais).fetchall()
-    
-    # Estatísticas adicionais
-    total_transacoes = len(transacoes)
-    maior_receita = conn.execute('''
-        SELECT MAX(valor) as max FROM transacoes 
-        WHERE tipo = "receita" AND data BETWEEN ? AND ?
-    ''', [data_inicio, data_fim]).fetchone()['max'] or 0
-    
-    maior_despesa = conn.execute('''
-        SELECT MAX(valor) as max FROM transacoes 
-        WHERE tipo = "despesa" AND data BETWEEN ? AND ?
-    ''', [data_inicio, data_fim]).fetchone()['max'] or 0
+    totais = {'receita': {'quantidade': 0, 'total': 0}, 'despesa': {'quantidade': 0, 'total': 0}}
+    for row in totais_result:
+        totais[row['tipo']] = {
+            'quantidade': row['quantidade'],
+            'total': float(row['total'])
+        }
     
     conn.close()
     
-    totais_dict = {}
-    for total in totais:
-        totais_dict[total['tipo']] = {
-            'quantidade': total['quantidade'],
-            'total': float(total['total'])
-        }
-    
     return jsonify({
-        'transacoes': result,
-        'totais': totais_dict,
-        'estatisticas': {
-            'total_transacoes': total_transacoes,
-            'maior_receita': float(maior_receita),
-            'maior_despesa': float(maior_despesa)
-        },
+        'transacoes': [dict(transacao) for transacao in transacoes],
+        'totais': totais,
         'periodo': {
             'inicio': data_inicio,
-            'fim': data_fim
-        },
-        'filtros': {
-            'tipo': tipo,
-            'categoria': categoria
+            'fim': data_fim,
+            'tipo': tipo
         }
     })
 
 @app.route('/relatorio/pdf')
-def gerar_pdf():
-    # Parâmetros do relatório
+def relatorio_pdf():
     data_inicio = request.args.get('data_inicio')
     data_fim = request.args.get('data_fim')
     tipo = request.args.get('tipo', 'todos')
-    categoria = request.args.get('categoria', 'todas')
     
     # Buscar dados
-    conn = get_db_connection()
-    
-    query = '''
-        SELECT t.*, c.cor 
-        FROM transacoes t 
-        LEFT JOIN categorias c ON t.categoria = c.nome AND t.tipo = c.tipo
-        WHERE t.data BETWEEN ? AND ?
-    '''
-    params = [data_inicio, data_fim]
-    
-    if tipo != 'todos':
-        query += ' AND t.tipo = ?'
-        params.append(tipo)
-    
-    if categoria != 'todas':
-        query += ' AND t.categoria = ?'
-        params.append(categoria)
-    
-    query += ' ORDER BY t.data, t.tipo'
-    
-    transacoes = conn.execute(query, params).fetchall()
-    
-    # Calcular totais
-    query_totais = '''
-        SELECT 
-            tipo,
-            COUNT(*) as quantidade,
-            SUM(valor) as total
-        FROM transacoes 
-        WHERE data BETWEEN ? AND ?
-    '''
-    params_totais = [data_inicio, data_fim]
-    
-    if tipo != 'todos':
-        query_totais += ' AND tipo = ?'
-        params_totais.append(tipo)
-    
-    if categoria != 'todas':
-        query_totais += ' AND categoria = ?'
-        params_totais.append(categoria)
-    
-    query_totais += ' GROUP BY tipo'
-    
-    totais = conn.execute(query_totais, params_totais).fetchall()
-    
-    conn.close()
-    
-    # Criar PDF
-    buffer = io.BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=A4, topMargin=50, bottomMargin=50)
-    
-    # Estilos
-    styles = getSampleStyleSheet()
-    estilo_titulo = ParagraphStyle(
-        'CustomTitle',
-        parent=styles['Heading1'],
-        fontSize=16,
-        textColor=colors.HexColor('#2c3e50'),
-        spaceAfter=30,
-        alignment=1  # Centralizado
-    )
-    
-    estilo_subtitulo = ParagraphStyle(
-        'CustomSubtitle',
-        parent=styles['Normal'],
-        fontSize=10,
-        textColor=colors.HexColor('#7f8c8d'),
-        spaceAfter=20
-    )
-    
-    # Conteúdo do PDF
-    conteudo = []
-    
-    # Título
-    titulo = Paragraph("RELATÓRIO FINANCEIRO DETALHADO", estilo_titulo)
-    conteudo.append(titulo)
-    
-    # Informações do período
-    data_emissao = datetime.now().strftime('%d/%m/%Y às %H:%M')
-    periodo_texto = f"Período: {formatar_data_ptbr(data_inicio)} a {formatar_data_ptbr(data_fim)}"
-    tipo_texto = f"Tipo: {tipo.capitalize()}" if tipo != 'todos' else "Tipo: Todos"
-    categoria_texto = f"Categoria: {categoria}" if categoria != 'todas' else "Categoria: Todas"
-    
-    info_periodo = f"{periodo_texto} | {tipo_texto} | {categoria_texto} | Emitido em: {data_emissao}"
-    conteudo.append(Paragraph(info_periodo, estilo_subtitulo))
-    conteudo.append(Spacer(1, 20))
-    
-    # Tabela de transações
-    if transacoes:
-        # Cabeçalho da tabela
-        dados_tabela = [['Data', 'Descrição', 'Categoria', 'Tipo', 'Valor (R$)']]
-        
-        for transacao in transacoes:
-            data_formatada = formatar_data_ptbr(transacao['data'])
-            tipo_formatado = 'Receita' if transacao['tipo'] == 'receita' else 'Despesa'
-            valor_formatado = f"R$ {transacao['valor']:,.2f}"
-            
-            dados_tabela.append([
-                data_formatada,
-                transacao['descricao'],
-                transacao['categoria'],
-                tipo_formatado,
-                valor_formatado
-            ])
-        
-        # Criar tabela
-        tabela = Table(dados_tabela, colWidths=[60, 180, 80, 60, 80])
-        tabela.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#34495e')),
-            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-            ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
-            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, 0), 8),
-            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-            ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
-            ('TEXTCOLOR', (0, 1), (-1, -1), colors.black),
-            ('ALIGN', (0, 1), (-1, -1), 'LEFT'),
-            ('ALIGN', (4, 1), (4, -1), 'RIGHT'),
-            ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
-            ('FONTSIZE', (0, 1), (-1, -1), 7),
-            ('GRID', (0, 0), (-1, -1), 1, colors.black),
-            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.lightgrey]),
-        ]))
-        
-        conteudo.append(tabela)
-        conteudo.append(Spacer(1, 30))
-    
-    # Resumo
-    total_receitas = 0
-    total_despesas = 0
-    
-    for total in totais:
-        if total['tipo'] == 'receita':
-            total_receitas = float(total['total'])
-        else:
-            total_despesas = float(total['total'])
-    
-    saldo = total_receitas - total_despesas
-    
-    # Tabela de resumo
-    dados_resumo = [
-        ['RESUMO DO PERÍODO', ''],
-        ['Total de Receitas', f'R$ {total_receitas:,.2f}'],
-        ['Total de Despesas', f'R$ {total_despesas:,.2f}'],
-        ['SALDO FINAL', f'R$ {saldo:,.2f}']
-    ]
-    
-    tabela_resumo = Table(dados_resumo, colWidths=[200, 150])
-    tabela_resumo.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#2c3e50')),
-        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-        ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
-        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('BACKGROUND', (0, 1), (-1, -1), colors.lightgrey),
-        ('ALIGN', (0, 1), (0, -1), 'LEFT'),
-        ('ALIGN', (1, 1), (1, -1), 'RIGHT'),
-        ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
-        ('FONTSIZE', (0, 0), (-1, -1), 10),
-        ('GRID', (0, 0), (-1, -1), 1, colors.black),
-    ]))
-    
-    # Destacar saldo
-    if saldo >= 0:
-        cor_saldo = colors.HexColor('#27ae60')
-    else:
-        cor_saldo = colors.HexColor('#e74c3c')
-    
-    tabela_resumo.setStyle(TableStyle([
-        ('BACKGROUND', (0, 3), (-1, 3), cor_saldo),
-        ('TEXTCOLOR', (0, 3), (-1, 3), colors.white),
-        ('FONTNAME', (0, 3), (-1, 3), 'Helvetica-Bold'),
-    ]))
-    
-    conteudo.append(tabela_resumo)
-    
-    # Gerar PDF
-    doc.build(conteudo)
-    
-    buffer.seek(0)
-    response = make_response(buffer.getvalue())
-    response.headers['Content-Type'] = 'application/pdf'
-    
-    nome_arquivo = f'relatorio_financeiro_{data_inicio}_{data_fim}.pdf'
-    if tipo != 'todos':
-        nome_arquivo = f'relatorio_{tipo}_{data_inicio}_{data_fim}.pdf'
-    
-    response.headers['Content-Disposition'] = f'attachment; filename={nome_arquivo}'
-    
-    return response
-
-@app.route('/api/relatorios/exportar-csv')
-def exportar_csv():
-    data_inicio = request.args.get('data_inicio')
-    data_fim = request.args.get('data_fim')
-    tipo = request.args.get('tipo', 'todos')
-    
     conn = get_db_connection()
     
     query = '''
@@ -665,91 +401,110 @@ def exportar_csv():
         query += ' AND tipo = ?'
         params.append(tipo)
     
-    query += ' ORDER BY data, tipo'
+    query += ' ORDER BY data DESC'
     
     transacoes = conn.execute(query, params).fetchall()
+    
+    # Calcular totais
+    receitas = conn.execute(
+        'SELECT SUM(valor) as total FROM transacoes WHERE tipo = "receita" AND data BETWEEN ? AND ?',
+        (data_inicio, data_fim)
+    ).fetchone()['total'] or 0
+    
+    despesas = conn.execute(
+        'SELECT SUM(valor) as total FROM transacoes WHERE tipo = "despesa" AND data BETWEEN ? AND ?',
+        (data_inicio, data_fim)
+    ).fetchone()['total'] or 0
+    
+    saldo = receitas - despesas
+    
     conn.close()
     
-    # Criar CSV
-    output = io.StringIO()
-    output.write('Data,Descrição,Categoria,Tipo,Valor\n')
+    # Gerar PDF
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=A4)
+    elements = []
     
-    for transacao in transacoes:
-        data_formatada = formatar_data_ptbr(transacao['data'])
-        output.write(f'"{data_formatada}","{transacao["descricao"]}","{transacao["categoria"]}","{transacao["tipo"]}",{transacao["valor"]}\n')
+    # Estilos
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle(
+        'CustomTitle',
+        parent=styles['Heading1'],
+        fontSize=16,
+        spaceAfter=30,
+        alignment=1
+    )
     
-    response = make_response(output.getvalue())
-    response.headers['Content-Type'] = 'text/csv; charset=utf-8'
-    response.headers['Content-Disposition'] = f'attachment; filename=relatorio_{data_inicio}_{data_fim}.csv'
+    # Título
+    title = Paragraph(f'Relatório Financeiro - {data_inicio} a {data_fim}', title_style)
+    elements.append(title)
+    
+    # Resumo
+    resumo_data = [
+        ['Receitas', formatar_moeda_pdf(receitas)],
+        ['Despesas', formatar_moeda_pdf(despesas)],
+        ['Saldo', formatar_moeda_pdf(saldo)]
+    ]
+    
+    resumo_table = Table(resumo_data, colWidths=[300, 100])
+    resumo_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, -1), colors.lightgrey),
+        ('TEXTCOLOR', (0, 0), (-1, -1), colors.black),
+        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+        ('FONTNAME', (0, 0), (-1, -1), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 12),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 12),
+    ]))
+    
+    elements.append(resumo_table)
+    elements.append(Spacer(1, 20))
+    
+    # Tabela de transações
+    if transacoes:
+        table_data = [['Data', 'Descrição', 'Categoria', 'Tipo', 'Valor']]
+        
+        for transacao in transacoes:
+            table_data.append([
+                transacao['data'],
+                transacao['descricao'],
+                transacao['categoria'],
+                'Receita' if transacao['tipo'] == 'receita' else 'Despesa',
+                formatar_moeda_pdf(transacao['valor'])
+            ])
+        
+        transacoes_table = Table(table_data, colWidths=[60, 150, 80, 60, 60])
+        transacoes_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 10),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+            ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+            ('FONTSIZE', (0, 1), (-1, -1), 8),
+            ('GRID', (0, 0), (-1, -1), 1, colors.black)
+        ]))
+        
+        elements.append(transacoes_table)
+    else:
+        elements.append(Paragraph('Nenhuma transação encontrada para o período.', styles['Normal']))
+    
+    doc.build(elements)
+    buffer.seek(0)
+    
+    response = make_response(buffer.getvalue())
+    response.headers['Content-Type'] = 'application/pdf'
+    response.headers['Content-Disposition'] = f'attachment; filename=relatorio_{data_inicio}_{data_fim}.pdf'
     
     return response
 
-# Funções auxiliares
-def formatar_data_ptbr(data_iso):
-    """Converte data ISO para formato brasileiro"""
-    try:
-        data_obj = datetime.strptime(data_iso, '%Y-%m-%d')
-        return data_obj.strftime('%d/%m/%Y')
-    except:
-        return data_iso
-
-# Rota para estatísticas em tempo real
-@app.route('/api/estatisticas/tempo-real')
-def estatisticas_tempo_real():
-    conn = get_db_connection()
-    
-    # Transações do dia
-    hoje = datetime.now().strftime('%Y-%m-%d')
-    transacoes_hoje = conn.execute('''
-        SELECT COUNT(*) as total, 
-               SUM(CASE WHEN tipo = 'receita' THEN valor ELSE 0 END) as receitas,
-               SUM(CASE WHEN tipo = 'despesa' THEN valor ELSE 0 END) as despesas
-        FROM transacoes 
-        WHERE data = ?
-    ''', (hoje,)).fetchone()
-    
-    # Próximas despesas (próximos 7 dias)
-    data_futura = (datetime.now() + timedelta(days=7)).strftime('%Y-%m-%d')
-    proximas_despesas = conn.execute('''
-        SELECT descricao, valor, data 
-        FROM transacoes 
-        WHERE tipo = 'despesa' AND data BETWEEN ? AND ?
-        ORDER BY data
-        LIMIT 5
-    ''', (hoje, data_futura)).fetchall()
-    
-    # Categoria com maior gasto no mês
-    mes_atual = datetime.now().strftime('%Y-%m')
-    categoria_maior_gasto = conn.execute('''
-        SELECT categoria, SUM(valor) as total
-        FROM transacoes 
-        WHERE tipo = 'despesa' AND strftime('%Y-%m', data) = ?
-        GROUP BY categoria 
-        ORDER BY total DESC 
-        LIMIT 1
-    ''', (mes_atual,)).fetchone()
-    
-    conn.close()
-    
-    return jsonify({
-        'hoje': {
-            'transacoes': transacoes_hoje['total'] or 0,
-            'receitas': float(transacoes_hoje['receitas'] or 0),
-            'despesas': float(transacoes_hoje['despesas'] or 0)
-        },
-        'proximas_despesas': [{
-            'descricao': despesa['descricao'],
-            'valor': float(despesa['valor']),
-            'data': despesa['data']
-        } for despesa in proximas_despesas],
-        'categoria_maior_gasto': {
-            'categoria': categoria_maior_gasto['categoria'] if categoria_maior_gasto else 'Nenhuma',
-            'total': float(categoria_maior_gasto['total']) if categoria_maior_gasto else 0
-        } if categoria_maior_gasto else None
-    })
+def formatar_moeda_pdf(valor):
+    if valor is None:
+        valor = 0
+    return f'R$ {float(valor):,.2f}'.replace(',', 'X').replace('.', ',').replace('X', '.')
 
 # Inicialização
-init_db()
-
 if __name__ == '__main__':
+    init_db()
     app.run(debug=True, host='0.0.0.0', port=5000)
