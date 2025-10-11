@@ -1,0 +1,128 @@
+:root {
+    --primary-color: #3498db;
+    --success-color: #27ae60;
+    --danger-color: #e74c3c;
+    --warning-color: #f39c12;
+    --info-color: #17a2b8;
+}
+
+body {
+    background-color: #f8f9fa;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+.card {
+    border: none;
+    border-radius: 10px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    transition: transform 0.2s;
+}
+
+.card:hover {
+    transform: translateY(-2px);
+}
+
+.transacao-item {
+    border-left: 4px solid;
+    padding: 10px 15px;
+    margin-bottom: 10px;
+    border-radius: 5px;
+    background: white;
+}
+
+.transacao-receita {
+    border-left-color: var(--success-color);
+}
+
+.transacao-despesa {
+    border-left-color: var(--danger-color);
+}
+
+.btn-action {
+    padding: 2px 8px;
+    margin-left: 5px;
+}
+
+/* Responsividade */
+@media (max-width: 768px) {
+    .container-fluid {
+        padding: 10px;
+    }
+    
+    .card-body {
+        padding: 15px;
+    }
+    
+    .transacao-item {
+        padding: 8px 12px;
+    }
+}
+
+/* Animações */
+.fade-in {
+    animation: fadeIn 0.5s ease-in;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+/* ... (estilos anteriores mantidos) */
+
+/* Estilos para Relatório */
+#tabela-relatorio th {
+    font-size: 0.85rem;
+    font-weight: 600;
+}
+
+#tabela-relatorio td {
+    font-size: 0.8rem;
+    vertical-align: middle;
+}
+
+.badge-receita {
+    background-color: var(--success-color);
+}
+
+.badge-despesa {
+    background-color: var(--danger-color);
+}
+
+/* Estilos para impressão */
+@media print {
+    .navbar, .card-header, .btn, .modal-footer {
+        display: none !important;
+    }
+    
+    .modal-body {
+        display: block !important;
+    }
+    
+    .table-responsive {
+        overflow: visible !important;
+    }
+}
+
+/* Cards de resumo do relatório */
+.card-resumo {
+    border: none;
+    border-radius: 8px;
+    transition: transform 0.2s;
+}
+
+.card-resumo:hover {
+    transform: translateY(-2px);
+}
+
+/* Loading para relatório */
+.loading-relatorio {
+    display: none;
+    text-align: center;
+    padding: 2rem;
+}
+
+.loading-relatorio .spinner {
+    width: 3rem;
+    height: 3rem;
+}
