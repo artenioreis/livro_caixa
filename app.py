@@ -18,7 +18,10 @@ try:
     
     # CONFIGURAÇÃO DO CAMINHO DO TESSERACT - AJUSTE MANUAL
     # Substitua pelo caminho correto no seu sistema, se necessário
+    # Exemplo para Windows:
     pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
+    # Exemplo para Linux (geralmente não precisa se estiver no PATH):
+    # pytesseract.pytesseract.tesseract_cmd = r'/usr/bin/tesseract'
     
     # Verificar se o Tesseract está acessível
     try:
@@ -29,19 +32,17 @@ try:
     except Exception as e:
         TESSERACT_AVAILABLE = False
         print(f"✗ Erro ao acessar Tesseract: {e}")
+        print("✗ Dica: Verifique se o Tesseract-OCR está instalado e se o caminho no app.py está correto.")
         
 except ImportError as e:
     TESSERACT_AVAILABLE = False
-    print(f"✗ Bibliotecas OCR não disponíveis: {e}")
+    print(f"✗ Bibliotecas OCR não disponíveis: {e}. Para usar a função de anexo, instale-as com 'pip install pytesseract pillow pdf2image'.")
 
-from reportlab.lib.pagesizes import A4, letter
+from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
-from reportlab.lib.utils import ImageReader
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
 from reportlab.lib import colors
-from reportlab.pdfbase import pdfmetrics
-from reportlab.pdfbase.ttfonts import TTFont
 
 app = Flask(__name__)
 app.secret_key = 'sua_chave_secreta_aqui_troque_por_algo_seguro' # IMPORTANTE: Troque por uma chave segura
@@ -103,30 +104,23 @@ def init_db():
         )
     ''')
     
-    # Inserir categorias padrão
-    categorias_receita = [
-        ('Salário', 'receita', '#28a745'),
-        ('Freelance', 'receita', '#20c997'),
-        ('Investimentos', 'receita', '#17a2b8'),
-        ('Vendas', 'receita', '#6f42c1'),
-        ('Outros', 'receita', '#6c757d')
-    ]
-    
-    categorias_despesa = [
-        ('Alimentação', 'despesa', '#dc3545'),
-        ('Moradia', 'despesa', '#fd7e14'),
-        ('Transporte', 'despesa', '#ffc107'),
-        ('Saúde', 'despesa', '#e83e8c'),
-        ('Educação', 'despesa', '#6f42c1'),
-        ('Lazer', 'despesa', '#20c997'),
-        ('Outros', 'despesa', '#6c757d')
-    ]
-    
-    for categoria in categorias_receita:
-        conn.execute('INSERT OR IGNORE INTO categorias (nome, tipo, cor) VALUES (?, ?, ?)', categoria)
-    
-    for categoria in categorias_despesa:
-        conn.execute('INSERT OR IGNORE INTO categorias (nome, tipo, cor) VALUES (?, ?, ?)', categoria)
+    # Inserir categorias padrão se a tabela estiver vazia
+    cursor = conn.cursor()
+    cursor.execute("SELECT COUNT(id) FROM categorias")
+    if cursor.fetchone()[0] == 0:
+        categorias_receita = [
+            ('Salário', 'receita', '#28a745'), ('Freelance', 'receita', '#20c997'),
+            ('Investimentos', 'receita', '#17a2b8'), ('Vendas', 'receita', '#6f42c1'),
+            ('Outros', 'receita', '#6c757d')
+        ]
+        categorias_despesa = [
+            ('Alimentação', 'despesa', '#dc3545'), ('Moradia', 'despesa', '#fd7e14'),
+            ('Transporte', 'despesa', '#ffc107'), ('Saúde', 'despesa', '#e83e8c'),
+            ('Educação', 'despesa', '#6f42c1'), ('Lazer', 'despesa', '#20c997'),
+            ('Outros', 'despesa', '#6c757d')
+        ]
+        conn.executemany('INSERT INTO categorias (nome, tipo, cor) VALUES (?, ?, ?)', categorias_receita)
+        conn.executemany('INSERT INTO categorias (nome, tipo, cor) VALUES (?, ?, ?)', categorias_despesa)
     
     conn.commit()
     conn.close()
@@ -169,9 +163,10 @@ def register():
             except db.IntegrityError:
                 error = f"Usuário {username} já está registrado."
             else:
+                flash("Cadastro realizado com sucesso! Faça o login.", "success")
                 return redirect(url_for("login"))
         
-        flash(error)
+        flash(error, 'danger')
 
     return render_template('register.html')
 
@@ -185,16 +180,16 @@ def login():
         user = db.execute('SELECT * FROM users WHERE username = ?', (username,)).fetchone()
 
         if user is None:
-            error = 'Usuário incorreto.'
+            error = 'Usuário ou senha incorretos.'
         elif not check_password_hash(user['password'], password):
-            error = 'Senha incorreta.'
+            error = 'Usuário ou senha incorretos.'
 
         if error is None:
             session.clear()
             session['user_id'] = user['id']
             return redirect(url_for('index'))
 
-        flash(error)
+        flash(error, 'danger')
 
     return render_template('login.html')
 
@@ -242,7 +237,7 @@ def backup():
 @login_required
 def processar_ocr():
     if not TESSERACT_AVAILABLE:
-        return jsonify({'success': False, 'error': 'Recurso OCR não disponível.'})
+        return jsonify({'success': False, 'error': 'Recurso OCR não disponível no servidor.'})
 
     if 'anexo' not in request.files:
         return jsonify({'success': False, 'error': 'Nenhum arquivo enviado.'})
@@ -270,7 +265,7 @@ def processar_ocr():
             except Exception as e:
                 return jsonify({'success': False, 'error': f'Erro ao processar imagem: {str(e)}'})
         
-        matches = re.findall(r'(\d+[\.,]\d{2})', text)
+        matches = re.findall(r'(\d+[.,]\d{2})', text)
         valor_encontrado = 0.0
         if matches:
             max_valor = 0
@@ -285,9 +280,7 @@ def processar_ocr():
 
         return jsonify({
             'success': True, 
-            'valor': valor_encontrado, 
-            'texto': text,
-            'mensagem': f'Valor R$ {valor_encontrado:.2f} extraído do anexo.' if valor_encontrado > 0 else 'Nenhum valor monetário encontrado no anexo.'
+            'valor': valor_encontrado
         })
     except Exception as e:
         return jsonify({'success': False, 'error': f'Erro ao processar o arquivo: {str(e)}'})
@@ -297,7 +290,7 @@ def processar_ocr():
 def api_transacoes():
     conn = get_db_connection()
     if request.method == 'GET':
-        transacoes = conn.execute('SELECT t.*, c.cor FROM transacoes t LEFT JOIN categorias c ON t.categoria = c.nome AND t.tipo = c.tipo ORDER BY t.data DESC, t.id DESC').fetchall()
+        transacoes = conn.execute('SELECT * FROM transacoes ORDER BY data DESC, id DESC').fetchall()
         result = [dict(row) for row in transacoes]
         conn.close()
         return jsonify(result)
@@ -309,7 +302,7 @@ def api_transacoes():
             if 'anexo' in request.files:
                 file = request.files['anexo']
                 if file and file.filename and allowed_file(file.filename):
-                    anexo_filename = secure_filename(file.filename)
+                    anexo_filename = secure_filename(f"{datetime.now().strftime('%Y%m%d%H%M%S')}_{file.filename}")
                     file.save(os.path.join(app.config['UPLOAD_FOLDER'], anexo_filename))
 
             conn.execute(
@@ -360,15 +353,17 @@ def api_mensal():
         SELECT 
             strftime('%Y-%m', data) as mes,
             SUM(CASE WHEN tipo = 'receita' THEN valor ELSE 0 END) as receitas,
-            SUM(CASE WHEN tipo = 'despesa' THEN valor ELSE 0 END) as despesas,
-            SUM(CASE WHEN tipo = 'receita' THEN valor ELSE -valor END) as saldo
+            SUM(CASE WHEN tipo = 'despesa' THEN valor ELSE 0 END) as despesas
         FROM transacoes
         GROUP BY mes ORDER BY mes DESC LIMIT 12
     """
     resultados = conn.execute(query).fetchall()
     conn.close()
     dados = [dict(row) for row in resultados]
-    return jsonify(dados[::-1])
+    # Calcula o saldo para cada mês
+    for item in dados:
+        item['saldo'] = item['receitas'] - item['despesas']
+    return jsonify(dados[::-1]) # Inverte para ordem cronológica
 
 @app.route('/api/relatorios/categorias')
 @login_required
@@ -401,26 +396,20 @@ def api_relatorio_detalhado():
     query += ' ORDER BY data DESC, id DESC'
     transacoes = conn.execute(query, params).fetchall()
     
-    totais_query = 'SELECT tipo, COUNT(*) as quantidade, SUM(valor) as total FROM transacoes WHERE data BETWEEN ? AND ?'
+    totais_query = 'SELECT tipo, COUNT(*) as quantidade, SUM(valor) as total FROM transacoes WHERE data BETWEEN ? AND ? GROUP BY tipo'
     totais_params = [data_inicio, data_fim]
     
-    if tipo != 'todos':
-        totais_query += ' AND tipo = ?'
-        totais_params.append(tipo)
-    
-    totais_query += ' GROUP BY tipo'
     totais_result = conn.execute(totais_query, totais_params).fetchall()
     
     totais = {'receita': {'quantidade': 0, 'total': 0}, 'despesa': {'quantidade': 0, 'total': 0}}
     for row in totais_result:
-        totais[row['tipo']] = {'quantidade': row['quantidade'], 'total': row['total']}
+        totais[row['tipo']] = {'quantidade': row['quantidade'], 'total': row['total'] or 0}
     
     conn.close()
     
     return jsonify({
         'transacoes': [dict(t) for t in transacoes],
-        'totais': totais,
-        'periodo': {'inicio': data_inicio, 'fim': data_fim, 'tipo': tipo}
+        'totais': totais
     })
 
 @app.route('/relatorio/pdf')
@@ -432,7 +421,7 @@ def relatorio_pdf():
     
     conn = get_db_connection()
     
-    query = 'SELECT * FROM transacoes WHERE data BETWEEN ? AND ?'
+    query = 'SELECT data, descricao, categoria, tipo, valor FROM transacoes WHERE data BETWEEN ? AND ?'
     params = [data_inicio, data_fim]
     
     if tipo != 'todos':
@@ -442,34 +431,70 @@ def relatorio_pdf():
     query += ' ORDER BY data DESC'
     transacoes = conn.execute(query, params).fetchall()
     
-    receitas = conn.execute('SELECT SUM(valor) as total FROM transacoes WHERE tipo = "receita" AND data BETWEEN ? AND ?', (data_inicio, data_fim)).fetchone()['total'] or 0
-    despesas = conn.execute('SELECT SUM(valor) as total FROM transacoes WHERE tipo = "despesa" AND data BETWEEN ? AND ?', (data_inicio, data_fim)).fetchone()['total'] or 0
+    # Calcula totais para o período
+    totais_query = "SELECT tipo, SUM(valor) as total FROM transacoes WHERE data BETWEEN ? AND ? GROUP BY tipo"
+    totais_result = conn.execute(totais_query, (data_inicio, data_fim)).fetchall()
+
+    receitas = 0
+    despesas = 0
+    for row in totais_result:
+        if row['tipo'] == 'receita':
+            receitas = row['total'] or 0
+        elif row['tipo'] == 'despesa':
+            despesas = row['total'] or 0
     saldo = receitas - despesas
-    
     conn.close()
     
     buffer = io.BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=A4)
+    doc = SimpleDocTemplate(buffer, pagesize=A4, leftMargin=30, rightMargin=30, topMargin=30, bottomMargin=30)
     elements = []
     
     styles = getSampleStyleSheet()
-    title_style = ParagraphStyle('CustomTitle', parent=styles['Heading1'], fontSize=16, spaceAfter=30, alignment=1)
+    title_style = ParagraphStyle('CustomTitle', parent=styles['h1'], alignment=1, spaceAfter=20)
     
-    elements.append(Paragraph(f'Relatório Financeiro - {data_inicio} a {data_fim}', title_style))
+    elements.append(Paragraph(f'Relatório Financeiro', title_style))
+    elements.append(Paragraph(f"<b>Período:</b> {datetime.strptime(data_inicio, '%Y-%m-%d').strftime('%d/%m/%Y')} a {datetime.strptime(data_fim, '%Y-%m-%d').strftime('%d/%m/%Y')}", styles['Normal']))
+    elements.append(Paragraph(f"<b>Tipo:</b> {tipo.capitalize()}", styles['Normal']))
+    elements.append(Spacer(1, 20))
     
-    resumo_data = [['Receitas', f'R$ {receitas:,.2f}'], ['Despesas', f'R$ {despesas:,.2f}'], ['Saldo', f'R$ {saldo:,.2f}']]
-    resumo_table = Table(resumo_data, colWidths=[300, 100])
-    resumo_table.setStyle(TableStyle([('BACKGROUND', (0, 0), (-1, -1), colors.lightgrey), ('TEXTCOLOR', (0, 0), (-1, -1), colors.black), ('ALIGN', (0, 0), (-1, -1), 'LEFT'), ('FONTNAME', (0, 0), (-1, -1), 'Helvetica-Bold'), ('FONTSIZE', (0, 0), (-1, -1), 12), ('BOTTOMPADDING', (0, 0), (-1, -1), 12)]))
+    # Tabela de Resumo
+    resumo_data = [
+        ['Total de Receitas:', f'R$ {receitas:,.2f}'],
+        ['Total de Despesas:', f'R$ {despesas:,.2f}'],
+        ['Saldo do Período:', f'R$ {saldo:,.2f}']
+    ]
+    resumo_table = Table(resumo_data, colWidths=['*', 120])
+    resumo_table.setStyle(TableStyle([
+        ('ALIGN', (0, 0), (-1, -1), 'RIGHT'),
+        ('FONTNAME', (0, 0), (-1, -1), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 10),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+        ('TOPPADDING', (0, 0), (-1, -1), 8),
+        ('BACKGROUND', (0, 0), (0, 0), colors.Color(0.2, 0.4, 0.6)), # Azul para Receita
+        ('BACKGROUND', (0, 1), (0, 1), colors.Color(0.8, 0.2, 0.2)), # Vermelho para Despesa
+        ('BACKGROUND', (0, 2), (0, 2), colors.Color(0.5, 0.5, 0.5)), # Cinza para Saldo
+        ('TEXTCOLOR', (0,0), (0,2), colors.white),
+    ]))
     elements.append(resumo_table)
     elements.append(Spacer(1, 20))
     
     if transacoes:
-        table_data = [['Data', 'Descrição', 'Categoria', 'Tipo', 'Valor']]
-        for t in transacoes:
-            table_data.append([t['data'], t['descricao'], t['categoria'], t['tipo'].capitalize(), f"R$ {t['valor']:,.2f}"])
+        table_header = ['Data', 'Descrição', 'Categoria', 'Tipo', 'Valor (R$)']
+        table_data = [table_header] + [[datetime.strptime(t['data'], '%Y-%m-%d').strftime('%d/%m/%Y'), t['descricao'], t['categoria'], t['tipo'].capitalize(), f"{t['valor']:,.2f}"] for t in transacoes]
         
-        transacoes_table = Table(table_data, colWidths=[60, 150, 80, 60, 60])
-        transacoes_table.setStyle(TableStyle([('BACKGROUND', (0, 0), (-1, 0), colors.grey), ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke), ('ALIGN', (0, 0), (-1, -1), 'CENTER'), ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'), ('FONTSIZE', (0, 0), (-1, 0), 10), ('BOTTOMPADDING', (0, 0), (-1, 0), 12), ('BACKGROUND', (0, 1), (-1, -1), colors.beige), ('GRID', (0, 0), (-1, -1), 1, colors.black)]))
+        transacoes_table = Table(table_data, colWidths=[60, '*', 100, 60, 80])
+        transacoes_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 10),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+            ('GRID', (0, 0), (-1, -1), 1, colors.black),
+            ('ALIGN', (-1, 1), (-1, -1), 'RIGHT'), # Alinha a coluna de valor à direita
+        ]))
         elements.append(transacoes_table)
     else:
         elements.append(Paragraph('Nenhuma transação encontrada para o período.', styles['Normal']))
@@ -479,9 +504,11 @@ def relatorio_pdf():
     
     response = make_response(buffer.getvalue())
     response.headers['Content-Type'] = 'application/pdf'
-    response.headers['Content-Disposition'] = f'attachment; filename=relatorio_{data_inicio}_{data_fim}.pdf'
+    response.headers['Content-Disposition'] = f'inline; filename=relatorio_{data_inicio}_a_{data_fim}.pdf'
     
     return response
+
+# ROTA DE IMPORTAÇÃO CORRIGIDA E ROBUSTA
 @app.route('/importar_planilha', methods=['POST'])
 @login_required
 def importar_planilha():
@@ -496,10 +523,8 @@ def importar_planilha():
         return redirect(url_for('lancamentos'))
 
     try:
-        # Ler o arquivo excel usando pandas
-        df = pd.read_excel(file)
+        df = pd.read_excel(file, dtype={'Valor': float})
 
-        # Verificar se as colunas obrigatórias existem
         colunas_obrigatorias = ['Data', 'Descricao', 'Valor', 'Tipo', 'Categoria']
         for coluna in colunas_obrigatorias:
             if coluna not in df.columns:
@@ -508,35 +533,57 @@ def importar_planilha():
 
         conn = get_db_connection()
         transacoes_importadas = 0
+        transacoes_ignoradas = 0
 
-        # Iterar sobre cada linha da planilha
         for index, row in df.iterrows():
-            # Validar e limpar os dados de cada linha
-            data = pd.to_datetime(row['Data']).strftime('%Y-%m-%d')
-            descricao = str(row['Descricao'])
-            valor = float(row['Valor'])
-            tipo = str(row['Tipo']).lower()
-            categoria = str(row['Categoria'])
+            try:
+                # Validação e limpeza dos dados de cada linha
+                data = pd.to_datetime(row['Data']).strftime('%Y-%m-%d')
+                descricao = str(row['Descricao']).strip()
+                valor = round(float(row['Valor']), 2)
+                tipo = str(row['Tipo']).lower().strip()
+                categoria = str(row['Categoria']).strip()
 
-            if tipo not in ['receita', 'despesa']:
-                continue # Pula linhas com tipo inválido
+                if tipo not in ['receita', 'despesa']:
+                    transacoes_ignoradas += 1
+                    continue
 
-            # Inserir no banco de dados
-            conn.execute(
-                'INSERT INTO transacoes (data, descricao, valor, tipo, categoria) VALUES (?, ?, ?, ?, ?)',
-                (data, descricao, valor, tipo, categoria)
-            )
-            transacoes_importadas += 1
+                # VERIFICA SE JÁ EXISTE UMA TRANSAÇÃO IDÊNTICA
+                existe = conn.execute(
+                    'SELECT id FROM transacoes WHERE data = ? AND descricao = ? AND valor = ? AND tipo = ?',
+                    (data, descricao, valor, tipo)
+                ).fetchone()
+
+                if existe:
+                    transacoes_ignoradas += 1
+                    continue # Pula para a próxima linha se a transação já existir
+
+                # INSERE A NOVA TRANSAÇÃO
+                conn.execute(
+                    'INSERT INTO transacoes (data, descricao, valor, tipo, categoria) VALUES (?, ?, ?, ?, ?)',
+                    (data, descricao, valor, tipo, categoria)
+                )
+                transacoes_importadas += 1
+            
+            except (ValueError, TypeError, KeyError):
+                # Se uma linha tiver dados inválidos (ex: texto em 'Valor', coluna faltando), ignora e continua
+                transacoes_ignoradas += 1
+                continue
 
         conn.commit()
         conn.close()
-
-        flash(f'{transacoes_importadas} transações importadas com sucesso!', 'success')
+        
+        mensagem = f'{transacoes_importadas} transações importadas com sucesso!'
+        if transacoes_ignoradas > 0:
+            mensagem += f' {transacoes_ignoradas} foram ignoradas por já existirem ou conterem dados inválidos.'
+        
+        flash(mensagem, 'success' if transacoes_importadas > 0 else 'warning')
 
     except Exception as e:
         flash(f'Ocorreu um erro ao processar a planilha: {e}', 'danger')
 
     return redirect(url_for('lancamentos'))
+
 
 # --- Inicialização ---
 
