@@ -416,7 +416,8 @@ function configurarFormularioRelatorio() {
     
     configurarDatasRelatorio();
     
-    setTimeout(gerarRelatorio, 100);
+    // Gera o relatório inicial assim que a página carrega
+    setTimeout(gerarRelatorio, 100); 
 }
 
 async function gerarRelatorio() {
@@ -430,7 +431,7 @@ async function gerarRelatorio() {
     }
     
     const resultadoDiv = document.getElementById('resultado-relatorio');
-    resultadoDiv.style.display = 'block';
+    resultadoDiv.style.display = 'block'; // Garante que a seção do relatório seja exibida
     
     try {
         const response = await fetch(`/api/relatorios/detalhado?data_inicio=${dataInicio}&data_fim=${dataFim}&tipo=${tipo}`);
@@ -442,66 +443,100 @@ async function gerarRelatorio() {
     }
 }
 
+// ***** FUNÇÃO CORRIGIDA *****
 function exibirRelatorio() {
-    const resultadoDiv = document.getElementById('resultado-relatorio');
-    if (!dadosRelatorio) {
-        resultadoDiv.style.display = 'none';
-        return;
-    }
+    if (!dadosRelatorio) return;
 
+    // Seleciona os elementos que serão preenchidos
+    const resumoContainer = document.getElementById('resumo-relatorio');
+    const corpoTabela = document.getElementById('corpo-tabela-relatorio');
+    const rodapeTabela = document.getElementById('rodape-tabela-relatorio');
+
+    // Limpa o conteúdo anterior
+    resumoContainer.innerHTML = '';
+    corpoTabela.innerHTML = '';
+    rodapeTabela.innerHTML = '';
+    
+    // Calcula os totais
     const totais = dadosRelatorio.totais;
-    const totalReceitas = totais.receita.total;
-    const totalDespesas = totais.despesa.total;
+    const totalReceitas = totais.receita.total || 0;
+    const totalDespesas = totais.despesa.total || 0;
     const saldo = totalReceitas - totalDespesas;
 
-    let html = `
-        <div class="row mb-4" id="resumo-relatorio">
-            <div class="col-md-3 mb-3"><div class="card card-resumo bg-light"><div class="card-body text-center"><h6 class="card-title text-muted">Transações</h6><h3 class="text-primary">${dadosRelatorio.transacoes.length}</h3></div></div></div>
-            <div class="col-md-3 mb-3"><div class="card card-resumo bg-success bg-opacity-10"><div class="card-body text-center"><h6 class="card-title text-muted">Receitas</h6><h3 class="text-success">${formatarMoeda(totalReceitas)}</h3></div></div></div>
-            <div class="col-md-3 mb-3"><div class="card card-resumo bg-danger bg-opacity-10"><div class="card-body text-center"><h6 class="card-title text-muted">Despesas</h6><h3 class="text-danger">${formatarMoeda(totalDespesas)}</h3></div></div></div>
-            <div class="col-md-3 mb-3"><div class="card card-resumo ${saldo >= 0 ? 'bg-info bg-opacity-10' : 'bg-warning bg-opacity-10'}"><div class="card-body text-center"><h6 class="card-title text-muted">Saldo</h6><h3 class="${saldo >= 0 ? 'text-info' : 'text-warning'}">${formatarMoeda(saldo)}</h3></div></div></div>
-        </div>
-        <div class="card">
-            <div class="card-header d-flex justify-content-between align-items-center">
-                <h6 class="mb-0"><i class="fas fa-list-ul me-2"></i>Transações do Período</h6>
-                <div>
-                    <button class="btn btn-sm btn-outline-secondary" onclick="exportarPDF()"><i class="fas fa-file-pdf me-1"></i>PDF</button>
-                    <button class="btn btn-sm btn-outline-secondary" onclick="imprimirRelatorio()"><i class="fas fa-print me-1"></i>Imprimir</button>
+    // 1. Preenche os cards de resumo
+    const resumoHtml = `
+        <div class="col-md-3 mb-3">
+            <div class="card card-resumo bg-light">
+                <div class="card-body text-center">
+                    <h6 class="card-title text-muted">Transações</h6>
+                    <h3 class="text-primary">${dadosRelatorio.transacoes.length}</h3>
                 </div>
             </div>
-            <div class="card-body p-0">
-                <div class="table-responsive">
-                    <table class="table table-striped table-hover mb-0" id="tabela-relatorio">
-                        <thead class="table-light"><tr><th>Data</th><th>Descrição</th><th>Categoria</th><th>Tipo</th><th class="text-end">Valor (R$)</th></tr></thead>
-                        <tbody>`;
+        </div>
+        <div class="col-md-3 mb-3">
+            <div class="card card-resumo bg-success bg-opacity-10">
+                <div class="card-body text-center">
+                    <h6 class="card-title text-muted">Receitas</h6>
+                    <h3 class="text-success">${formatarMoeda(totalReceitas)}</h3>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3 mb-3">
+            <div class="card card-resumo bg-danger bg-opacity-10">
+                <div class="card-body text-center">
+                    <h6 class="card-title text-muted">Despesas</h6>
+                    <h3 class="text-danger">${formatarMoeda(totalDespesas)}</h3>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3 mb-3">
+            <div class="card card-resumo ${saldo >= 0 ? 'bg-info bg-opacity-10' : 'bg-warning bg-opacity-10'}">
+                <div class="card-body text-center">
+                    <h6 class="card-title text-muted">Saldo</h6>
+                    <h3 class="${saldo >= 0 ? 'text-info' : 'text-warning'}">${formatarMoeda(saldo)}</h3>
+                </div>
+            </div>
+        </div>
+    `;
+    resumoContainer.innerHTML = resumoHtml;
 
+    // 2. Preenche o corpo da tabela de transações
+    let corpoTabelaHtml = '';
     if (dadosRelatorio.transacoes.length === 0) {
-        html += `<tr><td colspan="5" class="text-center text-muted py-4">Nenhuma transação encontrada para o período selecionado.</td></tr>`;
+        corpoTabelaHtml = `<tr><td colspan="5" class="text-center text-muted py-4">Nenhuma transação encontrada para o período selecionado.</td></tr>`;
     } else {
         dadosRelatorio.transacoes.forEach(transacao => {
-            html += `
+            corpoTabelaHtml += `
                 <tr>
                     <td>${formatarData(transacao.data)}</td>
                     <td>${transacao.descricao}</td>
                     <td><span class="badge bg-secondary">${transacao.categoria}</span></td>
-                    <td><span class="badge ${transacao.tipo === 'receita' ? 'badge-receita' : 'badge-despesa'}">${transacao.tipo === 'receita' ? 'Receita' : 'Despesa'}</span></td>
-                    <td class="text-end fw-bold ${transacao.tipo === 'receita' ? 'text-success' : 'text-danger'}">${transacao.tipo === 'receita' ? '+' : '-'} ${formatarMoeda(transacao.valor)}</td>
+                    <td><span class="badge ${transacao.tipo === 'receita' ? 'bg-success' : 'bg-danger'}">${transacao.tipo === 'receita' ? 'Receita' : 'Despesa'}</span></td>
+                    <td class="text-end fw-bold ${transacao.tipo === 'receita' ? 'text-success' : 'text-danger'}">${formatarMoeda(transacao.valor)}</td>
                 </tr>`;
         });
     }
+    corpoTabela.innerHTML = corpoTabelaHtml;
 
-    html += `
-                        </tbody>
-                        <tfoot class="table-group-divider">
-                            <tr><td colspan="3"></td><td class="text-end"><strong>Total Receitas:</strong></td><td class="text-end text-success"><strong>+ ${formatarMoeda(totalReceitas)}</strong></td></tr>
-                            <tr><td colspan="3"></td><td class="text-end"><strong>Total Despesas:</strong></td><td class="text-end text-danger"><strong>- ${formatarMoeda(totalDespesas)}</strong></td></tr>
-                            <tr class="table-active"><td colspan="3"></td><td class="text-end"><strong>Saldo Final:</strong></td><td class="text-end ${saldo >= 0 ? 'text-success' : 'text-danger'}"><strong>${formatarMoeda(saldo)}</strong></td></tr>
-                        </tfoot>
-                    </table>
-                </div>
-            </div>
-        </div>`;
-    resultadoDiv.innerHTML = html;
+    // 3. Preenche o rodapé da tabela com os totais
+    const rodapeTabelaHtml = `
+        <tr>
+            <td colspan="3"></td>
+            <td class="text-end"><strong>Total Receitas:</strong></td>
+            <td class="text-end text-success"><strong>${formatarMoeda(totalReceitas)}</strong></td>
+        </tr>
+        <tr>
+            <td colspan="3"></td>
+            <td class="text-end"><strong>Total Despesas:</strong></td>
+            <td class="text-end text-danger"><strong>${formatarMoeda(totalDespesas)}</strong></td>
+        </tr>
+        <tr class="table-active">
+            <td colspan="3"></td>
+            <td class="text-end"><strong>Saldo Final:</strong></td>
+            <td class="text-end fw-bold ${saldo >= 0 ? 'text-success' : 'text-danger'}"><strong>${formatarMoeda(saldo)}</strong></td>
+        </tr>
+    `;
+    rodapeTabela.innerHTML = rodapeTabelaHtml;
 }
 
 function exportarPDF() {

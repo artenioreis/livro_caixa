@@ -17,12 +17,10 @@
                                 <option value="despesa" selected>Despesa</option>
                             </select>
                         </div>
-
                         <div class="mb-3">
                             <label for="descricao" class="form-label"><strong>Descrição</strong> <span class="text-danger">*</span></label>
                             <input type="text" class="form-control" id="descricao" placeholder="Ex: Compra de material de escritório" required>
                         </div>
-                        
                         <div class="row">
                             <div class="col-md-6 mb-3">
                                 <label for="valor" class="form-label"><strong>Valor (R$)</strong> <span class="text-danger">*</span></label>
@@ -33,7 +31,6 @@
                                 <input type="date" class="form-control" id="data" required>
                             </div>
                         </div>
-                        
                         <div class="row">
                             <div class="col-md-6 mb-3">
                                 <label for="categoria" class="form-label"><strong>Categoria</strong> <span class="text-danger">*</span></label>
@@ -62,24 +59,45 @@
                                 </select>
                             </div>
                         </div>
-
                         <div class="mb-3">
                             <label for="anexo" class="form-label"><strong>Anexo (Comprovante)</strong></label>
                             <input type="file" class="form-control" id="anexo" accept=".jpg,.jpeg,.png,.pdf">
                             <small class="form-text text-muted">Formatos permitidos: .jpg, .png, .pdf. O valor será preenchido automaticamente.</small>
                         </div>
-
                         <div class="mb-4">
                             <label for="observacoes" class="form-label"><strong>Observações</strong></label>
                             <textarea class="form-control" id="observacoes" rows="3" placeholder="Detalhes adicionais sobre o lançamento..."></textarea>
                         </div>
-                        
                         <div class="d-grid gap-2 d-md-flex justify-content-md-end border-top pt-3">
                             <button type="button" class="btn btn-secondary" onclick="window.location.href='{{ url_for('index') }}'">
                                 <i class="fas fa-times me-2"></i>Cancelar
                             </button>
                             <button type="submit" class="btn btn-primary">
                                 <i class="fas fa-save me-2"></i>Salvar Lançamento
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+
+            <div class="card shadow-sm mb-4">
+                <div class="card-header bg-success text-white">
+                    <h5 class="mb-0"><i class="fas fa-file-excel me-2"></i>Importar Lançamentos por Planilha</h5>
+                </div>
+                <div class="card-body p-4">
+                    <p class="text-muted">Envie um arquivo Excel (.xlsx) para adicionar múltiplos lançamentos de uma só vez.</p>
+                    <div class="alert alert-info small">
+                        <strong>Atenção:</strong> Sua planilha deve conter as colunas: 
+                        <code class="fw-bold">Data</code>, <code class="fw-bold">Descricao</code>, <code class="fw-bold">Valor</code>, <code class="fw-bold">Tipo</code> e <code class="fw-bold">Categoria</code>.
+                    </div>
+                    <form action="{{ url_for('importar_planilha') }}" method="post" enctype="multipart/form-data">
+                        <div class="mb-3">
+                            <label for="planilha" class="form-label"><strong>Selecione o arquivo Excel</strong></label>
+                            <input type="file" class="form-control" name="planilha" id="planilha" accept=".xlsx" required>
+                        </div>
+                        <div class="d-grid">
+                             <button type="submit" class="btn btn-success">
+                                <i class="fas fa-upload me-2"></i>Enviar e Importar
                             </button>
                         </div>
                     </form>
@@ -93,6 +111,13 @@
                     <h5 class="mb-0"><i class="fas fa-history me-2"></i>Histórico de Transações</h5>
                 </div>
                 <div class="card-body">
+                    {% with messages = get_flashed_messages(with_categories=true) %}
+                        {% if messages %}
+                            {% for category, message in messages %}
+                                <div class="alert alert-{{ category }}">{{ message }}</div>
+                            {% endfor %}
+                        {% endif %}
+                    {% endwith %}
                     <div id="lista-transacoes" style="max-height: 800px; overflow-y: auto;">
                         </div>
                 </div>
@@ -109,7 +134,7 @@
         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
       </div>
       <div class="modal-body text-center" id="anexoModalBody">
-        </div>
+      </div>
     </div>
   </div>
 </div>
